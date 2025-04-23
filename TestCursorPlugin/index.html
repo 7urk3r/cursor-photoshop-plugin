@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SaveOnPeptides Auto Replace Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>SaveOnPeptides Auto Replace Tool</h1>
+        
+        <div class="tabs">
+            <div id="textReplaceTab" class="tab active">Auto Text Replace</div>
+            <div id="imageReplaceTab" class="tab">Auto Image Replace</div>
+            <div id="logsTab" class="tab">Logs</div>
+        </div>
+
+        <div id="textReplacePanel" class="panel active">
+            <h2>Auto Text Replace</h2>
+            <div class="section">
+                <p class="label">Select a CSV file to process:</p>
+                <button id="loadCSV" class="primary-button">Choose CSV File</button>
+            </div>
+
+            <div class="section">
+                <p class="label">Select output folder:</p>
+                <button id="selectOutputFolder" class="primary-button">Choose Output Folder</button>
+            </div>
+            
+            <div class="section">
+                <p class="label">Processing Options:</p>
+                <div class="radio-group">
+                    <label class="radio">
+                        <input type="radio" name="processType" value="current" checked>
+                        Process Current Row
+                    </label>
+                    <label class="radio">
+                        <input type="radio" name="processType" value="all">
+                        Process All Rows
+                    </label>
+                </div>
+                <button id="processText" class="primary-button">Process CSV</button>
+            </div>
+
+            <div class="section">
+                <p class="label">Status:</p>
+                <div id="textStatus" class="status"></div>
+            </div>
+        </div>
+
+        <div id="imageReplacePanel" class="panel">
+            <h2>Auto Image Replace</h2>
+            <div class="section">
+                <button id="loadInputFolder" class="primary-button">Choose Input Folder</button>
+            </div>
+
+            <div class="section">
+                <p class="label">Select a CSV file to process:</p>
+                <button id="loadCSVImages" class="primary-button">Choose CSV File</button>
+            </div>
+
+            <div class="section">
+                <p class="label">Select output folder:</p>
+                <button id="selectOutputFolderImg" class="primary-button">Choose Output Folder</button>
+            </div>
+
+            <div class="section">
+                <p class="label">Processing Options:</p>
+                <div class="radio-group">
+                    <label class="radio">
+                        <input type="radio" name="processTypeImg" value="current" checked>
+                        Process Current Row
+                    </label>
+                    <label class="radio">
+                        <input type="radio" name="processTypeImg" value="all">
+                        Process All Rows
+                    </label>
+                </div>
+                <button id="processImages" class="primary-button">Process CSV</button>
+            </div>
+
+            <div class="section">
+                <p class="label">Status:</p>
+                <div id="imageStatus" class="status"></div>
+            </div>
+        </div>
+
+        <div id="logsPanel" class="panel">
+            <h2>Logs</h2>
+            <div id="logPanel" class="log-container"></div>
+            <div class="section">
+                <button id="restartPlugin" class="primary-button">Restart Plugin (via MCP)</button>
+            </div>
+        </div>
+    </div>
+    <script src="index.js"></script>
+</body>
+</html>

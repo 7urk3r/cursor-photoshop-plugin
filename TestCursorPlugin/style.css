@@ -1,0 +1,115 @@
+body {
+    margin: 0;
+    padding: 16px;
+    background-color: #2b2b2b;
+    color: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+h1 {
+    font-size: 24px;
+    margin-bottom: 24px;
+    color: #ffffff;
+}
+
+h2 {
+    font-size: 20px;
+    margin-bottom: 20px;
+    color: #ffffff;
+}
+
+.tabs {
+    display: flex;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #404040;
+}
+
+.tab {
+    padding: 8px 16px;
+    cursor: pointer;
+    color: #999;
+    font-size: 14px;
+}
+
+.tab.active {
+    color: #ffffff;
+    border-bottom: 2px solid #4CAF50;
+}
+
+.panel {
+    display: none;
+    padding: 20px;
+    background: #333333;
+    border-radius: 8px;
+}
+
+.panel.active {
+    display: block;
+}
+
+.section {
+    margin-bottom: 24px;
+}
+
+.label {
+    color: #cccccc;
+    margin-bottom: 12px;
+    font-size: 14px;
+}
+
+.primary-button {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-bottom: 16px;
+    width: 100%;
+    max-width: 300px;
+}
+
+.primary-button:hover {
+    background-color: #45a049;
+}
+
+.radio-group {
+    margin-bottom: 16px;
+}
+
+.radio {
+    display: block;
+    margin-bottom: 12px;
+    color: #ffffff;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.radio input[type="radio"] {
+    margin-right: 8px;
+}
+
+.status {
+    color: #cccccc;
+    font-size: 14px;
+    min-height: 20px;
+}
+
+.log-container {
+    background: #1e1e1e;
+    padding: 16px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #cccccc;
+    height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+} 
