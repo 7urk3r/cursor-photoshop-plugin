@@ -5,6 +5,19 @@ const { batchPlay } = require('photoshop').action;
 const fs = require('uxp').storage.localFileSystem;
 const formats = require('uxp').storage.formats;
 
+// Define log function
+function log(message) {
+    const logPanel = document.getElementById('logPanel');
+    if (logPanel) {
+        const logEntry = document.createElement('div');
+        logEntry.textContent = message;
+        logPanel.appendChild(logEntry);
+        // Auto-scroll to bottom
+        logPanel.scrollTop = logPanel.scrollHeight;
+    }
+    console.log(message);
+}
+
 // Enhanced state management with performance tracking and step completion
 const createPluginState = () => ({
     status: {
@@ -57,7 +70,7 @@ const batchPlayCommands = {
         _target: [{ _ref: "layer", _name: layerName }],
         makeVisible: true,
         _isCommand: true,
-        dialogOptions: "dontDisplay"
+        _options: { dialogOptions: "dontDisplay" }
     }),
     
     setText: (layerName, text) => ({
@@ -65,7 +78,7 @@ const batchPlayCommands = {
         _target: [{ _ref: "textLayer", _name: layerName }],
         to: { _obj: "textLayer", textKey: text },
         _isCommand: true,
-        dialogOptions: "dontDisplay"
+        _options: { dialogOptions: "dontDisplay" }
     }),
     
     setFontSize: (layerName, size) => ({
@@ -73,14 +86,14 @@ const batchPlayCommands = {
         _target: [{ _ref: "textLayer", _name: layerName }],
         to: { _obj: "characterStyle", size: { _unit: "pointsUnit", _value: parseFloat(size) } },
         _isCommand: true,
-        dialogOptions: "dontDisplay"
+        _options: { dialogOptions: "dontDisplay" }
     }),
 
     getCharacterStyle: (layerName) => ({
         _obj: "get",
         _target: [{ _ref: "property", _property: "characterStyle" }, { _ref: "textLayer", _name: layerName }],
         _isCommand: true,
-        dialogOptions: "dontDisplay"
+        _options: { dialogOptions: "dontDisplay" }
     })
 };
 
@@ -360,12 +373,13 @@ async function executeWithRetry(command, maxRetries = 3) {
         try {
             const result = await batchPlay([command], {
                 synchronousExecution: true,
-                modalBehavior: "execute"
+                modalBehavior: "none",
+                _options: { dialogOptions: "dontDisplay" }
             });
             return result;
         } catch (error) {
             lastError = error;
-            console.log(`[DEBUG] Retry ${i + 1} after error:`, error.message);
+            log(`[DEBUG] Retry ${i + 1} after error: ${error.message}`);
             if (i < maxRetries - 1) {
                 await wait(100 * Math.pow(2, i)); // Exponential backoff
             }
@@ -1583,7 +1597,8 @@ async function processTextReplacement() {
     const processType = document.querySelector('input[name="processType"]:checked')?.value;
     
     if (!processType) {
-        throw new PluginError('Process type not selected', 'INVALID_PROCESS_TYPE');
+        log('[Cursor OK] Process type not selected');
+        return;
     }
     
     try {
@@ -1736,32 +1751,8 @@ async function processTextReplacement() {
         }
         
     } catch (error) {
-        // Handle all errors, including re-thrown ones
-        console.error("[DEBUG] Text replacement failed:", {
-            error: error.message,
-            code: error.code,
-            details: error.details
-        });
-        
-        // Update UI with error
-        textStatus.textContent = error.message;
-        
-        // Log error to MCP
-        await writeToMCPRelay({
-            command: "sendError",
-            error: {
-                message: error.message,
-                code: error.code,
-                details: error.details
-            },
-            timestamp: new Date().toISOString()
-        });
-        
-        // Handle error through central error handler
         await handleError(error, 'text');
-        
     } finally {
-        // Always clean up state
         textReplaceState.status.isProcessing = false;
         textReplaceState.status.currentOperation = null;
     }
@@ -1770,7 +1761,7 @@ async function processTextReplacement() {
 // Update processImageReplacement to use image-specific folder setup
 async function processImageReplacement() {
     const imageStatus = document.getElementById('imageStatus');
-    const processType = document.querySelector('input[name="processTypeImg"]:checked').value;
+    const processType = document.querySelector('input[name="processTypeImg"]:checked')?.value;
     
     try {
         // Validate state
@@ -1833,7 +1824,7 @@ document.getElementById('loadCSV').addEventListener('click', async () => {
             document.getElementById('textStatus').textContent = 'CSV file loaded successfully';
         }
     } catch (error) {
-        log(`Error loading CSV: ${error.message}`);
+        log(`[Cursor OK] Error loading CSV: ${error.message}`);
         document.getElementById('textStatus').textContent = 'Error loading CSV file';
     }
 });
@@ -1960,83 +1951,158 @@ document.getElementById('restartPlugin').addEventListener('click', async () => {
     }
 });
 
-// Global tab and panel references
-const tabs = {
-    textReplace: null,
-    imageReplace: null,
-    logs: null
-};
+// Simple tab management
+function initializeTabs() {
+    // Get tab elements
+    const textReplaceTab = document.getElementById('textReplaceTab');
+    const imageReplaceTab = document.getElementById('imageReplaceTab');
+    const logsTab = document.getElementById('logsTab');
 
-const panels = {
-    textReplace: null,
-    imageReplace: null,
-    logs: null
-};
+    // Get panel elements
+    const textReplacePanel = document.getElementById('textReplacePanel');
+    const imageReplacePanel = document.getElementById('imageReplacePanel');
+    const logsPanel = document.getElementById('logsPanel');
 
-// Tab switching function
-function switchTab(tabId) {
-    // Hide all panels
-    Object.keys(panels).forEach(panelId => {
-        if (panels[panelId]) {
-            panels[panelId].style.display = 'none';
-            panels[panelId].classList.remove('active');
-        }
-    });
+    // Function to switch tabs
+    function switchTab(tabId) {
+        // Hide all panels
+        [textReplacePanel, imageReplacePanel, logsPanel].forEach(panel => {
+            if (panel) panel.style.display = 'none';
+        });
 
-    // Deactivate all tabs
-    Object.keys(tabs).forEach(tid => {
-        if (tabs[tid]) {
-            tabs[tid].classList.remove('active');
-        }
-    });
+        // Deactivate all tabs
+        [textReplaceTab, imageReplaceTab, logsTab].forEach(tab => {
+            if (tab) tab.classList.remove('active');
+        });
 
-    // Show selected panel and activate tab
-    if (panels[tabId]) {
-        panels[tabId].style.display = 'block';
-        panels[tabId].classList.add('active');
+        // Show selected panel and activate tab
+        const selectedPanel = document.getElementById(`${tabId}Panel`);
+        const selectedTab = document.getElementById(`${tabId}Tab`);
+        
+        if (selectedPanel) selectedPanel.style.display = 'block';
+        if (selectedTab) selectedTab.classList.add('active');
     }
-    if (tabs[tabId]) {
-        tabs[tabId].classList.add('active');
-    }
-}
-
-// Initialize plugin
-document.addEventListener('DOMContentLoaded', async () => {
-    log('[Cursor OK] Plugin initialized');
-    
-    // Initialize tab references
-    tabs.textReplace = document.getElementById('textReplaceTab');
-    tabs.imageReplace = document.getElementById('imageReplaceTab');
-    tabs.logs = document.getElementById('logsTab');
-
-    // Initialize panel references
-    panels.textReplace = document.getElementById('textReplacePanel');
-    panels.imageReplace = document.getElementById('imageReplacePanel');
-    panels.logs = document.getElementById('logsPanel');
 
     // Add click handlers
-    Object.keys(tabs).forEach(tabId => {
-        const tab = tabs[tabId];
-        if (tab) {
-            tab.addEventListener('click', () => switchTab(tabId));
-        }
-    });
+    if (textReplaceTab) textReplaceTab.addEventListener('click', () => switchTab('textReplace'));
+    if (imageReplaceTab) imageReplaceTab.addEventListener('click', () => switchTab('imageReplace'));
+    if (logsTab) logsTab.addEventListener('click', () => switchTab('logs'));
 
     // Set initial tab
     switchTab('textReplace');
+}
+
+// Initialize plugin
+document.addEventListener('DOMContentLoaded', () => {
+    log('[Cursor OK] Plugin initialized');
+    
+    // Initialize tabs
+    initializeTabs();
 
     // Write to MCP relay
-    try {
-        const payload = {
-            command: "sendLog",
-            message: "Plugin loaded and UI initialized.",
-            timestamp: new Date().toISOString()
-        };
-
-        const filePath = await writeToMCPRelay(payload);
-        log(`✅ MCP relay file location: ${filePath}`);
-    } catch (error) {
-        console.error('Error writing to MCP relay file:', error);
-        log(`❌ Error writing to MCP file: ${error.message}`);
-    }
+    writeToMCPRelay({
+        command: "sendLog",
+        message: "Plugin loaded and UI initialized.",
+        timestamp: new Date().toISOString()
+    }).catch(error => {
+        log(`[Cursor OK] MCP relay write failed: ${error.message}`);
+    });
 });
+
+// Modify error handling in other functions to use log instead of showing prompts
+async function handleError(error, context) {
+    const errorMessage = `[Cursor OK] ${context} error: ${error.message}`;
+    log(errorMessage);
+    
+    // Write to MCP relay without showing prompts
+    writeToMCPRelay({
+        command: "sendError",
+        error: {
+            message: error.message,
+            code: error.code,
+            details: error.details
+        },
+        timestamp: new Date().toISOString()
+    }).catch(mcpError => {
+        log(`[Cursor OK] MCP relay write failed: ${mcpError.message}`);
+    });
+}
+
+// Update manifest version
+const manifest = {
+    "id": "com.saveonpeptides.autoreplace",
+    "name": "SaveOnPeptides Auto Replace",
+    "version": "1.0.0",
+    "main": "index.js",
+    "host": {
+        "app": "PS",
+        "minVersion": "22.0.0"
+    },
+    "manifestVersion": 4,
+    "requiredPermissions": {
+        "allowCodeGenerationFromStrings": true,
+        "launchProcess": {
+            "schemes": ["http", "https"],
+            "extensions": [".exe", ".bat", ".cmd"]
+        },
+        "network": {
+            "domains": ["localhost"]
+        },
+        "clipboard": "readAndWrite",
+        "fs": "readWrite",
+        "webview": {
+            "allow": "yes",
+            "domains": ["https://*.adobe.com"]
+        }
+    },
+    "entrypoints": [
+        {
+            "type": "panel",
+            "id": "vanilla",
+            "label": {
+                "default": "SaveOnPeptides Auto Replace"
+            },
+            "minimumSize": {
+                "width": 230,
+                "height": 200
+            },
+            "maximumSize": {
+                "width": 2000,
+                "height": 2000
+            },
+            "preferredDockedSize": {
+                "width": 230,
+                "height": 300
+            },
+            "preferredFloatingSize": {
+                "width": 230,
+                "height": 300
+            },
+            "icons": [
+                {
+                    "width": 23,
+                    "height": 23,
+                    "path": "icons/dark.png",
+                    "scale": [1, 2],
+                    "theme": ["darkest", "dark", "medium"]
+                },
+                {
+                    "width": 23,
+                    "height": 23,
+                    "path": "icons/light.png",
+                    "scale": [1, 2],
+                    "theme": ["lightest", "light"]
+                }
+            ]
+        }
+    ],
+    "icons": [
+        {
+            "width": 48,
+            "height": 48,
+            "path": "icons/plugin.png",
+            "scale": [1, 2]
+        }
+    ],
+    "apiVersion": 2
+};

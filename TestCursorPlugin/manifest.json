@@ -8,15 +8,9 @@
     "minVersion": "22.0.0"
   },
   "manifestVersion": 4,
-  "requirements": {
-    "apps": [
-      {
-        "name": "PS",
-        "apiVersion": "2.0.0"
-      }
-    ]
-  },
-  "permissions": {
+  "apiVersion": 2,
+  "requiredPermissions": {
+    "allowCodeGenerationFromStrings": true,
     "filesystem": { "read": true, "write": true },
     "launchProcess": true,
     "network": true
