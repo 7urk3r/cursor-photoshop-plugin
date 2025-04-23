@@ -1,0 +1,26 @@
+# Ignore macOS system files
+.DS_Store
+
+# Ignore image and Photoshop outputs
+PNG/
+PSD/
+*.psd
+*.png
+
+# Ignore logs
+*.log
+log.txt
+
+# Ignore Cursor test output
+cursor-test.txt
+
+# Node modules (if ever added)
+node_modules/
+
+# Python cache (if MCP uses Python)
+__pycache__/
+*.pyc
+
+# VSCode / Editor settings
+.vscode/
+.idea/
