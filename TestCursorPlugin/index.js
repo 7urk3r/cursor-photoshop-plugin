@@ -250,11 +250,10 @@ function createLayerTarget(layer, options = {}) {
         throw new PluginError('No layer provided for targeting', 'INVALID_LAYER');
     }
 
-    // Log full layer details for debugging
+    // Log full layer details for debugging with API v2 properties
     console.log("[DEBUG] Creating target for layer:", {
         name: layer.name,
-        id: layer._id,
-        legacyId: layer.id,
+        id: layer._id,  // API v2 uses _id
         kind: layer.kind,
         type: typeof layer,
         hasTextItem: !!layer.textItem,
@@ -275,21 +274,19 @@ function createLayerTarget(layer, options = {}) {
         rawKind: typeof layerKind === 'number' ? layerKind : 'string'
     });
 
-    // Get the appropriate ID, with fallbacks and validation
-    const layerId = layer._id ?? layer.id;
-    if (typeof layerId !== 'number') {
+    // Get the appropriate ID for API v2
+    const layerId = layer._id;
+    if (!layerId) {
         console.error("[DEBUG] Invalid layer ID:", {
             _id: layer._id,
-            id: layer.id,
+            name: layer.name,
             type: typeof layerId,
             layer: JSON.stringify(layer, null, 2)
         });
         throw new PluginError(
-            'Invalid layer ID type', 
-            'INVALID_LAYER_ID_TYPE',
+            'Layer ID not found', 
+            'INVALID_LAYER_ID',
             { 
-                layerId,
-                type: typeof layerId,
                 layerName: layer.name,
                 layerKind
             }
@@ -308,19 +305,6 @@ function createLayerTarget(layer, options = {}) {
     // Merge with provided options, but ensure type is correct for the layer
     const finalOptions = { ...defaultOptions, ...options };
     
-    // Validate the targeting is appropriate for the layer type
-    if (finalOptions.type === 'textLayer' && !isTextLayer) {
-        throw new PluginError(
-            'Cannot target non-text layer as text layer',
-            'INVALID_LAYER_TYPE',
-            {
-                expectedType: 'text',
-                actualType: layerKind,
-                layerName: layer.name
-            }
-        );
-    }
-
     // Create the base target descriptor with enhanced validation
     const target = {
         _ref: finalOptions.type,
@@ -356,7 +340,7 @@ function createLayerTarget(layer, options = {}) {
             _target: [target],
             makeVisible: finalOptions.makeVisible,
             _isCommand: finalOptions._isCommand,
-            dialogOptions: finalOptions.dialogOptions
+            _options: { dialogOptions: "dontDisplay" }
         };
 
         console.log("[DEBUG] Created selection command:", selectCommand);
@@ -395,47 +379,40 @@ async function replaceText(layer, newText) {
             throw new PluginError('Invalid layer object', 'INVALID_LAYER');
         }
 
-        console.log("[DEBUG] Starting text replacement:", {
-            targetLayer: layer.name,
-            textToApply: newText,
-            timestamp: new Date().toISOString()
-        });
+        log(`[DEBUG] Starting text replacement for layer: ${layer.name}`);
 
         // Select layer first
-        await batchPlay([batchPlayCommands.selectLayer(layer.name)], {
-            synchronousExecution: true,
-            modalBehavior: "fail"
-        });
-        await wait(delays.selection);
+        await batchPlay(
+            [{
+                _obj: "select",
+                _target: [{ _ref: "layer", _name: layer.name }],
+                makeVisible: false
+            }],
+            { 
+                synchronousExecution: true,
+                modalBehavior: "execute"
+            }
+        );
 
         // Update text with line break handling
         const processedText = newText.replace(/\|br\|/g, '\r');
-        await batchPlay([batchPlayCommands.setText(layer.name, processedText)], {
-            synchronousExecution: true,
-            modalBehavior: "fail"
-        });
-        await wait(delays.textUpdate);
+        await batchPlay(
+            [{
+                _obj: "set",
+                _target: [{ _ref: "textLayer", _name: layer.name }],
+                to: { _obj: "textLayer", textKey: processedText }
+            }],
+            {
+                synchronousExecution: true,
+                modalBehavior: "execute"
+            }
+        );
 
-        // Verify text update through character panel
-        const verifyResult = await batchPlay([batchPlayCommands.getCharacterStyle(layer.name)], {
-            synchronousExecution: true,
-            modalBehavior: "fail"
-        });
-
-        console.log("[DEBUG] Text update verification:", {
-            layer: layer.name,
-            expected: processedText,
-            verifyResult,
-            success: true
-        });
-
+        log(`[DEBUG] Text updated for layer: ${layer.name}`);
         return true;
+
     } catch (error) {
-        console.error("[DEBUG] Text replacement error:", {
-            layer: layer?.name,
-            error: error.message,
-            code: error.code
-        });
+        log(`[DEBUG] Text replacement error for layer ${layer?.name}: ${error.message}`);
         throw new PluginError(
             `Failed to replace text in layer ${layer?.name}`,
             'TEXT_REPLACE_ERROR',
@@ -444,215 +421,238 @@ async function replaceText(layer, newText) {
     }
 }
 
-// Optimized font size update with verification
+async function verifyFontSize(layer, expectedSize) {
+    try {
+        log(`[DEBUG] Starting font size verification for layer "${layer.name}" (ID: ${layer._id})`);
+        log(`[DEBUG] Expected font size: ${expectedSize}pt`);
+        
+        // Method 1: Check via DOM API textItem property
+        let textItemSize;
+        try {
+            textItemSize = layer.textItem?.size;
+            log(`[DEBUG] TextItem size: ${textItemSize}pt (via DOM API)`);
+        } catch (textItemError) {
+            log(`[DEBUG] TextItem check failed: ${textItemError.message}`);
+        }
+
+        // Method 2: Check via text style property using executeAsModal
+        let textStyleSize;
+        try {
+            const result = await app.executeAsModal(async () => {
+                return layer.textItem?.style?.size;
+            });
+            textStyleSize = result;
+            log(`[DEBUG] Text style size: ${textStyleSize}pt (via style property)`);
+        } catch (styleError) {
+            log(`[DEBUG] Style property check failed: ${styleError.message}`);
+        }
+
+        // Collect all valid measurements
+        const measurements = [
+            { method: 'TextItem', size: textItemSize },
+            { method: 'Text Style', size: textStyleSize }
+        ].filter(m => m.size !== undefined && m.size !== null);
+
+        if (measurements.length === 0) {
+            log(`[DEBUG] ❌ No valid font size measurements obtained`);
+            return false;
+        }
+
+        // Log all measurements
+        log(`[DEBUG] All font size measurements:`, {
+            expected: expectedSize,
+            measurements: measurements.map(m => `${m.method}: ${m.size}pt`)
+        });
+
+        // Check for consistency among measurements with tolerance
+        const tolerance = 0.1;
+        const sizesMatch = measurements.every(m => 
+            Math.abs(parseFloat(m.size) - parseFloat(expectedSize)) < tolerance
+        );
+
+        if (!sizesMatch) {
+            const mismatchedSizes = measurements
+                .filter(m => Math.abs(parseFloat(m.size) - parseFloat(expectedSize)) >= tolerance)
+                .map(m => `${m.method}: ${m.size}pt`);
+            
+            log(`[DEBUG] ❌ Font size mismatch detected:`, {
+                expected: `${expectedSize}pt`,
+                mismatches: mismatchedSizes
+            });
+            return false;
+        }
+
+        log(`[DEBUG] ✅ Font size verified successfully: ${expectedSize}pt`);
+        return true;
+
+    } catch (error) {
+        log(`[DEBUG] ❌ Font size verification failed with error: ${error.message}`);
+        return false;
+    }
+}
+
 async function updateFontSize(layer, fontSize) {
     try {
         if (!layer?.name) {
             throw new PluginError('Invalid layer object', 'INVALID_LAYER');
         }
 
-        // Ensure fontSize is a valid number and convert to points
+        // Ensure fontSize is a valid number
         const size = parseFloat(fontSize);
         if (isNaN(size)) {
             throw new PluginError('Invalid font size', 'INVALID_FONT_SIZE', { fontSize });
         }
 
-        console.log("[DEBUG] Starting font size update:", {
-            layer: layer.name,
-            targetSize: size,
-            timestamp: new Date().toISOString()
-        });
+        log(`[DEBUG] Starting font size update for layer: ${layer.name} to size: ${size}`);
 
-        // Get initial font size for verification
-        const initialState = await batchPlay([{
-            _obj: "get",
-            _target: [
-                { _property: "textStyle" },
-                { _ref: "textLayer", _name: layer.name }
-            ],
-            _options: { dialogOptions: "dontDisplay" }
-        }], {
-            synchronousExecution: true,
-            modalBehavior: "fail"
-        });
+        // Get initial font size for comparison
+        const initialSize = await verifyFontSize(layer, size);
+        log(`[DEBUG] Initial font size verification: ${initialSize ? 'matches' : 'differs from'} target size`);
 
-        console.log("[DEBUG] Initial font state:", {
-            layer: layer.name,
-            currentSize: initialState?.[0]?.textStyle?.size?._value,
-            targetSize: size,
-            fullState: initialState
-        });
+        let updateSuccess = false;
+        const updateMethods = [];
 
-        // Select layer first with retry
-        let selectAttempts = 0;
-        while (selectAttempts < 3) {
-            try {
-                await batchPlay([{
-                    _obj: "select",
-                    _target: [{ _ref: "layer", _name: layer.name }],
-                    makeVisible: false,
-                    _options: { dialogOptions: "dontDisplay" }
-                }], {
-                    synchronousExecution: true,
-                    modalBehavior: "fail"
-                });
-                break;
-            } catch (selectError) {
-                selectAttempts++;
-                if (selectAttempts === 3) {
-                    throw new PluginError(
-                        'Failed to select layer for font size update',
-                        'LAYER_SELECT_ERROR',
-                        { attempts: selectAttempts, layer: layer.name }
-                    );
-                }
-                await wait(delays.selection * selectAttempts);
+        // Method 1: Try DOM API first
+        try {
+            layer.textItem.size = size;
+            updateMethods.push('DOM API');
+            log(`[DEBUG] Font size updated via DOM API`);
+            
+            // Quick verify
+            await wait(delays.fontUpdate);
+            if (await verifyFontSize(layer, size)) {
+                updateSuccess = true;
+                log(`[DEBUG] DOM API update verified successfully`);
             }
+        } catch (domError) {
+            log(`[DEBUG] DOM API update failed: ${domError.message}`);
         }
-        
-        await wait(delays.selection);
 
-        // Update font size with retry using explicit point unit
-        let updateAttempts = 0;
-        while (updateAttempts < 3) {
+        // Method 2: Try batchPlay with textStyle if DOM API failed
+        if (!updateSuccess) {
             try {
-                await batchPlay([{
+                const command = {
                     _obj: "set",
-                    _target: [{ _ref: "textLayer", _name: layer.name }],
+                    _target: [
+                        { 
+                            _ref: "textLayer",
+                            _id: layer._id 
+                        }
+                    ],
                     to: { 
                         _obj: "textStyle",
-                        size: { 
+                        size: {
                             _unit: "pointsUnit",
                             _value: size
                         }
                     },
-                    _options: { dialogOptions: "dontDisplay" }
-                }], {
-                    synchronousExecution: true,
-                    modalBehavior: "fail"
-                });
-                break;
-            } catch (updateError) {
-                updateAttempts++;
-                if (updateAttempts === 3) {
-                    throw new PluginError(
-                        'Failed to update font size',
-                        'FONT_SIZE_UPDATE_ERROR',
-                        { attempts: updateAttempts, layer: layer.name, size }
-                    );
+                    _isCommand: true,
+                    _options: { 
+                        dialogOptions: "dontDisplay"
+                    }
+                };
+
+                const result = await batchPlay(
+                    [command],
+                    {
+                        synchronousExecution: true,
+                        modalBehavior: "execute"
+                    }
+                );
+
+                updateMethods.push('batchPlay textStyle');
+                log(`[DEBUG] Font size updated via batchPlay textStyle`);
+
+                // Quick verify
+                await wait(delays.fontUpdate);
+                if (await verifyFontSize(layer, size)) {
+                    updateSuccess = true;
+                    log(`[DEBUG] BatchPlay textStyle update verified successfully`);
                 }
-                await wait(delays.fontUpdate * updateAttempts);
+            } catch (batchError) {
+                log(`[DEBUG] BatchPlay textStyle update failed: ${batchError.message}`);
             }
         }
 
-        await wait(delays.fontUpdate);
-
-        // Verify font size update through character panel with retry
-        let verifyAttempts = 0;
-        let verifyResult;
-        
-        while (verifyAttempts < 3) {
+        // Method 3: Try alternative batchPlay method if previous methods failed
+        if (!updateSuccess) {
             try {
-                verifyResult = await batchPlay([{
-                    _obj: "get",
+                const altCommand = {
+                    _obj: "set",
                     _target: [
-                        { _property: "textStyle" },
-                        { _ref: "textLayer", _name: layer.name }
+                        { 
+                            _ref: "property",
+                            _property: "textStyle"
+                        },
+                        { 
+                            _ref: "textLayer",
+                            _id: layer._id 
+                        }
                     ],
-                    _options: { dialogOptions: "dontDisplay" }
-                }], {
+                    to: { 
+                        _obj: "textStyle",
+                        size: {
+                            _unit: "pointsUnit",
+                            _value: size
+                        }
+                    },
+                    _options: { 
+                        dialogOptions: "dontDisplay"
+                    }
+                };
+
+                await batchPlay([altCommand], {
                     synchronousExecution: true,
-                    modalBehavior: "fail"
+                    modalBehavior: "execute"
                 });
 
-                const updatedSize = verifyResult?.[0]?.textStyle?.size?._value;
-                
-                console.log("[DEBUG] Font size verification attempt:", {
-                    layer: layer.name,
-                    attempt: verifyAttempts + 1,
-                    targetSize: size,
-                    actualSize: updatedSize,
-                    match: Math.abs(updatedSize - size) < 0.01,
-                    fullState: verifyResult
-                });
+                updateMethods.push('batchPlay property');
+                log(`[DEBUG] Font size updated via batchPlay property`);
 
-                if (Math.abs(updatedSize - size) < 0.01) {
-                    // Success - sizes match within tolerance
-                    console.log("[DEBUG] Font size update verified:", {
-                        layer: layer.name,
-                        targetSize: size,
-                        actualSize: updatedSize,
-                        attempts: verifyAttempts + 1,
-                        success: true
-                    });
-                    return true;
+                // Final verification
+                await wait(delays.fontUpdate);
+                if (await verifyFontSize(layer, size)) {
+                    updateSuccess = true;
+                    log(`[DEBUG] BatchPlay property update verified successfully`);
                 }
-
-                verifyAttempts++;
-                if (verifyAttempts === 3) {
-                    throw new PluginError(
-                        'Font size verification failed',
-                        'FONT_SIZE_VERIFY_ERROR',
-                        { 
-                            expected: size, 
-                            actual: updatedSize,
-                            attempts: verifyAttempts,
-                            verifyResult 
-                        }
-                    );
-                }
-                await wait(delays.verification * verifyAttempts);
-                
-            } catch (verifyError) {
-                verifyAttempts++;
-                if (verifyAttempts === 3) {
-                    throw new PluginError(
-                        'Font size verification failed',
-                        'FONT_SIZE_VERIFY_ERROR',
-                        { 
-                            error: verifyError.message,
-                            attempts: verifyAttempts,
-                            verifyResult 
-                        }
-                    );
-                }
-                await wait(delays.verification * verifyAttempts);
+            } catch (altError) {
+                log(`[DEBUG] BatchPlay property update failed: ${altError.message}`);
             }
         }
 
-        throw new PluginError(
-            'Font size update could not be verified',
-            'FONT_SIZE_VERIFY_ERROR',
-            { 
-                expected: size,
-                attempts: verifyAttempts,
-                verifyResult 
-            }
-        );
+        // Final status check
+        if (!updateSuccess) {
+            throw new Error(`Font size change could not be verified after trying multiple methods: ${updateMethods.join(', ')}`);
+        }
+
+        log(`[Cursor OK] Font size updated and verified for layer: ${layer.name} to ${size}pt`);
+        
+        // Write to MCP relay for tracking
+        await writeToMCPRelay({
+            command: "sendLog",
+            message: `Font size updated and verified: ${layer.name} -> ${size}pt`,
+            metrics: {
+                layer: layer.name,
+                targetSize: size,
+                verified: true,
+                methodsUsed: updateMethods
+            },
+            timestamp: new Date().toISOString()
+        });
+
+        return true;
 
     } catch (error) {
-        console.error("[DEBUG] Font size update failed:", {
-            layer: layer?.name,
-            targetSize: fontSize,
-            error: error.message,
-            code: error.code,
-            stack: error.stack
-        });
-        
+        log(`[DEBUG] Font size update error for layer ${layer?.name}: ${error.message}`);
         throw new PluginError(
             `Failed to update font size in layer ${layer?.name}`,
             'FONT_SIZE_UPDATE_ERROR',
-            { 
-                originalError: error,
-                layer: layer?.name,
-                fontSize,
-                details: error.details || {} 
-            }
+            { originalError: error, layer: layer?.name, fontSize }
         );
     }
 }
 
-// Optimized layer processing with verification
+// Optimized layer processing without verification
 async function processLayer(layer, rowData, layerIndex) {
     const layerStart = Date.now();
     const updates = { text: false, fontSize: false };
@@ -666,34 +666,15 @@ async function processLayer(layer, rowData, layerIndex) {
             );
         }
 
-        console.log("[DEBUG] Processing layer:", {
-            layer: layer.name,
-            layerIndex,
-            hasText: !!rowData[`text${layerIndex}`],
-            hasFontSize: !!rowData[`fontsize${layerIndex}`],
-            timestamp: new Date().toISOString()
-        });
-
-        // Get initial layer state for verification
-        const initialState = await batchPlay([batchPlayCommands.getCharacterStyle(layer.name)], {
-            synchronousExecution: true,
-            modalBehavior: "fail"
-        });
+        log(`[DEBUG] Processing layer: ${layer.name}`);
 
         // Update text if needed
         if (rowData[`text${layerIndex}`]) {
             try {
                 await replaceText(layer, rowData[`text${layerIndex}`]);
                 updates.text = true;
-                console.log("[DEBUG] Text update successful:", {
-                    layer: layer.name,
-                    text: rowData[`text${layerIndex}`]
-                });
             } catch (textError) {
-                console.error("[DEBUG] Text update failed:", {
-                    layer: layer.name,
-                    error: textError.message
-                });
+                log(`[DEBUG] Text update failed for layer ${layer.name}: ${textError.message}`);
                 throw textError;
             }
         }
@@ -703,54 +684,24 @@ async function processLayer(layer, rowData, layerIndex) {
             try {
                 await updateFontSize(layer, rowData[`fontsize${layerIndex}`]);
                 updates.fontSize = true;
-                console.log("[DEBUG] Font size update successful:", {
-                    layer: layer.name,
-                    size: rowData[`fontsize${layerIndex}`]
-                });
             } catch (fontError) {
-                console.error("[DEBUG] Font size update failed:", {
-                    layer: layer.name,
-                    error: fontError.message
-                });
+                log(`[DEBUG] Font size update failed for layer ${layer.name}: ${fontError.message}`);
                 throw fontError;
             }
         }
 
-        // Final verification of changes
-        const finalState = await batchPlay([batchPlayCommands.getCharacterStyle(layer.name)], {
-            synchronousExecution: true,
-            modalBehavior: "fail"
-        });
-
-        const verificationResult = {
+        return {
+            success: true,
             layer: layer.name,
             updates,
-            initialState,
-            finalState,
             duration: Date.now() - layerStart
         };
 
-        console.log("[DEBUG] Layer processing completed:", verificationResult);
-
-        return {
-            success: true,
-            ...verificationResult
-        };
-
     } catch (error) {
-        const errorContext = {
-            layer: layer?.name,
-            updates,
-            duration: Date.now() - layerStart,
-            error: error.message
-        };
-
-        console.error("[DEBUG] Layer processing failed:", errorContext);
-
         throw new PluginError(
             `Failed to process layer ${layer?.name}`,
             'LAYER_PROCESS_ERROR',
-            errorContext
+            { originalError: error, layer: layer?.name, updates }
         );
     }
 }
@@ -783,56 +734,74 @@ async function replaceImage(layer, imagePath) {
     }
 }
 
-// Enhanced folder setup with better error handling and validation
+// Enhanced folder setup with verification and conditional creation
 async function setupTextOutputFolders(outputFolder) {
     try {
         if (!outputFolder) {
             throw new PluginError('Output folder not selected', 'FOLDER_NOT_SELECTED');
         }
 
-        console.log("[DEBUG] Setting up text output folders in:", outputFolder.nativePath);
+        console.log("[DEBUG] Checking output folders in:", outputFolder.nativePath);
         const folders = {};
         
-        // Create PNG folder for text operations
+        // Check PNG folder, create if not exists
         try {
-            console.log("[DEBUG] Creating Text_PNG folder...");
+            console.log("[DEBUG] Checking Text_PNG folder...");
             folders.pngFolder = await outputFolder.getEntry('Text_PNG');
             if (!folders.pngFolder.isFolder) {
                 throw new Error('Text_PNG exists but is not a folder');
             }
-            console.log("[DEBUG] Found existing Text_PNG folder");
+            console.log("[DEBUG] Found existing Text_PNG folder:", folders.pngFolder.nativePath);
         } catch (error) {
-            console.log("[DEBUG] Creating new Text_PNG folder");
-            folders.pngFolder = await outputFolder.createEntry('Text_PNG', { type: 'folder' });
-            if (!folders.pngFolder || !folders.pngFolder.isFolder) {
-                throw new PluginError('Failed to create PNG folder', 'FOLDER_CREATE_ERROR');
+            console.log("[DEBUG] Text_PNG folder not found, creating new one...");
+            try {
+                folders.pngFolder = await outputFolder.createEntry('Text_PNG', { type: 'folder' });
+                if (!folders.pngFolder || !folders.pngFolder.isFolder) {
+                    throw new PluginError('Failed to create PNG folder', 'FOLDER_CREATE_ERROR');
+                }
+                console.log("[DEBUG] Created new Text_PNG folder:", folders.pngFolder.nativePath);
+            } catch (createError) {
+                throw new PluginError(
+                    'Failed to create Text_PNG folder',
+                    'FOLDER_CREATE_ERROR',
+                    { path: 'Text_PNG', error: createError }
+                );
             }
         }
         
-        // Create PSD folder for text operations
+        // Check PSD folder, create if not exists
         try {
-            console.log("[DEBUG] Creating Text_PSD folder...");
+            console.log("[DEBUG] Checking Text_PSD folder...");
             folders.psdFolder = await outputFolder.getEntry('Text_PSD');
             if (!folders.psdFolder.isFolder) {
                 throw new Error('Text_PSD exists but is not a folder');
             }
-            console.log("[DEBUG] Found existing Text_PSD folder");
+            console.log("[DEBUG] Found existing Text_PSD folder:", folders.psdFolder.nativePath);
         } catch (error) {
-            console.log("[DEBUG] Creating new Text_PSD folder");
-            folders.psdFolder = await outputFolder.createEntry('Text_PSD', { type: 'folder' });
-            if (!folders.psdFolder || !folders.psdFolder.isFolder) {
-                throw new PluginError('Failed to create PSD folder', 'FOLDER_CREATE_ERROR');
+            console.log("[DEBUG] Text_PSD folder not found, creating new one...");
+            try {
+                folders.psdFolder = await outputFolder.createEntry('Text_PSD', { type: 'folder' });
+                if (!folders.psdFolder || !folders.psdFolder.isFolder) {
+                    throw new PluginError('Failed to create PSD folder', 'FOLDER_CREATE_ERROR');
+                }
+                console.log("[DEBUG] Created new Text_PSD folder:", folders.psdFolder.nativePath);
+            } catch (createError) {
+                throw new PluginError(
+                    'Failed to create Text_PSD folder',
+                    'FOLDER_CREATE_ERROR',
+                    { path: 'Text_PSD', error: createError }
+                );
             }
         }
 
-        // Verify folders were created
+        // Verify both folders are accessible
         const pngExists = await folders.pngFolder.isEntry;
         const psdExists = await folders.psdFolder.isEntry;
         
         if (!pngExists || !psdExists) {
             throw new PluginError(
-                'Failed to verify output folders', 
-                'FOLDER_VERIFY_ERROR',
+                'Could not verify folder access', 
+                'FOLDER_ACCESS_ERROR',
                 {
                     pngExists,
                     psdExists,
@@ -842,7 +811,7 @@ async function setupTextOutputFolders(outputFolder) {
             );
         }
 
-        console.log("[DEBUG] Successfully created output folders:", {
+        console.log("[DEBUG] Output folders ready:", {
             png: folders.pngFolder.nativePath,
             psd: folders.psdFolder.nativePath
         });
@@ -851,8 +820,8 @@ async function setupTextOutputFolders(outputFolder) {
     } catch (error) {
         console.error("[DEBUG] Folder setup failed:", error);
         throw new PluginError(
-            'Failed to setup text output folders', 
-            'TEXT_FOLDER_SETUP_ERROR', 
+            'Failed to setup output folders', 
+            'FOLDER_SETUP_ERROR', 
             { 
                 error,
                 outputPath: outputFolder?.nativePath 
@@ -1068,302 +1037,176 @@ async function loadImageCSV(file) {
     }
 }
 
-// Save document as PNG with verification
-async function saveAsPNG(doc, outputPath, options = {}) {
+// Updated PNG save function with proper API v2 format
+async function saveAsPNG(doc, outputPath) {
     try {
-        // 1. Initial state logging
-        const initialState = {
-            docId: doc?.id,
-            docName: doc?.name,
-            activeDocId: app.activeDocument?.id,
-            activeDocName: app.activeDocument?.name,
-            hasSelection: app.activeDocument?.activeLayers?.length > 0,
-            selectedLayer: app.activeDocument?.activeLayers[0]?.name
-        };
-
-        console.log("[DEBUG] Starting PNG save - Initial State:", initialState);
-
-        // 2. Document validation with detailed checks
-        const activeDoc = app.activeDocument;
-        if (!activeDoc) {
-            console.error("[DEBUG] No active document found during PNG save");
-            throw new PluginError('No active document for PNG save', 'NO_ACTIVE_DOC_PNG');
-        }
-
-        // 3. Document ID verification
-        const docState = {
-            providedDocId: doc?.id,
-            activeDocId: activeDoc.id,
-            activeDocName: activeDoc.name,
-            layerCount: activeDoc.layers.length,
-            selectedLayers: activeDoc.activeLayers.map(l => ({
-                name: l.name,
-                id: l._id,
-                kind: l.kind
-            }))
-        };
-
-        console.log("[DEBUG] PNG Save - Document State:", docState);
-
-        // 4. Pre-save verification
-        const preSaveCheck = {
-            outputPathValid: !!outputPath,
-            outputFolder: outputPath.substring(0, outputPath.lastIndexOf('/')),
-            docIdMatch: doc?.id === activeDoc.id,
-            hasValidId: !!activeDoc.id
-        };
-
-        console.log("[DEBUG] PNG Save - Pre-save Verification:", preSaveCheck);
-
-        // 5. Construct save command with logging
-        const saveCommand = {
+        log(`[DEBUG] Starting PNG save to: ${outputPath}`);
+        
+        // Create the save descriptor
+        const saveDesc = {
             _obj: "save",
             as: {
                 _obj: "PNGFormat",
                 PNG8: false,
-                transparency: true
+                compression: 6
             },
-            in: { _path: outputPath, _kind: "local" },
+            in: { _path: outputPath },
+            documentID: doc._id,
             copy: true,
-            documentID: activeDoc.id,
-            _isCommand: true,
-            _options: { dialogOptions: "dontDisplay" }
+            lowerCase: true,
+            saveStages: {
+                _enum: "saveStagesType",
+                _value: "saveBegin"
+            },
+            _options: { 
+                dialogOptions: "dontDisplay"
+            }
         };
 
-        console.log("[DEBUG] PNG Save - BatchPlay Command:", saveCommand);
-
-        // 6. Execute save with detailed error catching
+        log("[DEBUG] Executing PNG save command...");
+        
         const result = await batchPlay(
-            [saveCommand],
+            [saveDesc],
             {
                 synchronousExecution: true,
-                modalBehavior: "fail"
+                modalBehavior: "none"
             }
         );
 
-        console.log("[DEBUG] PNG Save - BatchPlay Result:", result);
-
-        // 7. Post-save verification
-        let fileVerification;
-        try {
-            const savedFile = await fs.getFileForPath(outputPath);
-            fileVerification = {
-                exists: !!savedFile,
-                path: savedFile?.nativePath,
-                isFile: savedFile?.isFile,
-                name: savedFile?.name
-            };
-        } catch (verifyError) {
-            fileVerification = {
-                exists: false,
-                error: verifyError.message
-            };
-        }
-
-        console.log("[DEBUG] PNG Save - File Verification:", fileVerification);
-
-        if (!fileVerification.exists) {
-            throw new PluginError(
-                'PNG file not created after save command',
-                'PNG_SAVE_VERIFY_FAILED',
-                fileVerification
-            );
-        }
-
-        // 8. Final state check
-        const finalState = {
-            docId: app.activeDocument?.id,
-            docName: app.activeDocument?.name,
-            selectedLayer: app.activeDocument?.activeLayers[0]?.name,
-            saveTime: Date.now()
-        };
-
-        console.log("[DEBUG] PNG Save - Final State:", finalState);
-        
+        log(`[DEBUG] PNG Save completed successfully: ${outputPath}`);
         return result;
 
     } catch (error) {
-        // 9. Enhanced error logging
-        const errorContext = {
-            error: {
-                message: error.message,
-                code: error.code,
-                stack: error.stack
-            },
-            document: {
-                providedId: doc?.id,
-                activeId: app.activeDocument?.id,
-                name: app.activeDocument?.name
-            },
-            path: {
-                output: outputPath,
-                folder: outputPath.substring(0, outputPath.lastIndexOf('/'))
-            },
-            state: {
-                hasActiveDoc: !!app.activeDocument,
-                hasSelection: app.activeDocument?.activeLayers?.length > 0,
-                selectedLayer: app.activeDocument?.activeLayers[0]?.name
-            }
-        };
-
-        console.error("[DEBUG] PNG Save Failed - Full Context:", errorContext);
-        
+        log(`[DEBUG] PNG Save Failed: ${error.message}`);
         throw new PluginError(
             'Failed to save PNG',
             'PNG_SAVE_ERROR',
-            errorContext
+            { originalError: error, outputPath }
         );
     }
 }
 
-// Save document as PSD with verification
-async function saveAsPSD(doc, outputPath, options = {}) {
+// Updated PSD save function with proper API v2 format
+async function saveAsPSD(doc, outputPath) {
     try {
-        // 1. Initial state logging
-        const initialState = {
-            docId: doc?.id,
-            docName: doc?.name,
-            activeDocId: app.activeDocument?.id,
-            activeDocName: app.activeDocument?.name,
-            hasSelection: app.activeDocument?.activeLayers?.length > 0,
-            selectedLayer: app.activeDocument?.activeLayers[0]?.name
-        };
-
-        console.log("[DEBUG] Starting PSD save - Initial State:", initialState);
-
-        // 2. Document validation with detailed checks
-        const activeDoc = app.activeDocument;
-        if (!activeDoc) {
-            console.error("[DEBUG] No active document found during PSD save");
-            throw new PluginError('No active document for PSD save', 'NO_ACTIVE_DOC_PSD');
-        }
-
-        // 3. Document ID verification
-        const docState = {
-            providedDocId: doc?.id,
-            activeDocId: activeDoc.id,
-            activeDocName: activeDoc.name,
-            layerCount: activeDoc.layers.length,
-            selectedLayers: activeDoc.activeLayers.map(l => ({
-                name: l.name,
-                id: l._id,
-                kind: l.kind
-            }))
-        };
-
-        console.log("[DEBUG] PSD Save - Document State:", docState);
-
-        // 4. Pre-save verification
-        const preSaveCheck = {
-            outputPathValid: !!outputPath,
-            outputFolder: outputPath.substring(0, outputPath.lastIndexOf('/')),
-            docIdMatch: doc?.id === activeDoc.id,
-            hasValidId: !!activeDoc.id
-        };
-
-        console.log("[DEBUG] PSD Save - Pre-save Verification:", preSaveCheck);
-
-        // 5. Construct save command with logging
-        const saveCommand = {
+        log(`[DEBUG] Starting PSD save to: ${outputPath}`);
+        
+        // Create the save descriptor
+        const saveDesc = {
             _obj: "save",
             as: {
                 _obj: "photoshop35Format",
-                maximizeCompatibility: true
+                alphaChannels: true,
+                embedColorProfile: true,
+                layers: true,
+                maximizeCompatibility: true,
+                saveStages: {
+                    _enum: "saveStagesType",
+                    _value: "saveBegin"
+                }
             },
-            in: { _path: outputPath, _kind: "local" },
+            in: { _path: outputPath },
+            documentID: doc._id,
             copy: true,
-            documentID: activeDoc.id,
-            _isCommand: true,
-            _options: { dialogOptions: "dontDisplay" }
+            lowerCase: true,
+            _options: { 
+                dialogOptions: "dontDisplay"
+            }
         };
 
-        console.log("[DEBUG] PSD Save - BatchPlay Command:", saveCommand);
-
-        // 6. Execute save with detailed error catching
+        log("[DEBUG] Executing PSD save command...");
+        
         const result = await batchPlay(
-            [saveCommand],
+            [saveDesc],
             {
                 synchronousExecution: true,
-                modalBehavior: "fail"
+                modalBehavior: "none"
             }
         );
 
-        console.log("[DEBUG] PSD Save - BatchPlay Result:", result);
-
-        // 7. Post-save verification
-        let fileVerification;
-        try {
-            const savedFile = await fs.getFileForPath(outputPath);
-            fileVerification = {
-                exists: !!savedFile,
-                path: savedFile?.nativePath,
-                isFile: savedFile?.isFile,
-                name: savedFile?.name
-            };
-        } catch (verifyError) {
-            fileVerification = {
-                exists: false,
-                error: verifyError.message
-            };
-        }
-
-        console.log("[DEBUG] PSD Save - File Verification:", fileVerification);
-
-        if (!fileVerification.exists) {
-            throw new PluginError(
-                'PSD file not created after save command',
-                'PSD_SAVE_VERIFY_FAILED',
-                fileVerification
-            );
-        }
-
-        // 8. Final state check
-        const finalState = {
-            docId: app.activeDocument?.id,
-            docName: app.activeDocument?.name,
-            selectedLayer: app.activeDocument?.activeLayers[0]?.name,
-            saveTime: Date.now()
-        };
-
-        console.log("[DEBUG] PSD Save - Final State:", finalState);
-        
+        log(`[DEBUG] PSD Save completed successfully: ${outputPath}`);
         return result;
 
     } catch (error) {
-        // 9. Enhanced error logging
-        const errorContext = {
-            error: {
-                message: error.message,
-                code: error.code,
-                stack: error.stack
-            },
-            document: {
-                providedId: doc?.id,
-                activeId: app.activeDocument?.id,
-                name: app.activeDocument?.name
-            },
-            path: {
-                output: outputPath,
-                folder: outputPath.substring(0, outputPath.lastIndexOf('/'))
-            },
-            state: {
-                hasActiveDoc: !!app.activeDocument,
-                hasSelection: app.activeDocument?.activeLayers?.length > 0,
-                selectedLayer: app.activeDocument?.activeLayers[0]?.name
-            }
-        };
-
-        console.error("[DEBUG] PSD Save Failed - Full Context:", errorContext);
-        
+        log(`[DEBUG] PSD Save Failed: ${error.message}`);
         throw new PluginError(
             'Failed to save PSD',
             'PSD_SAVE_ERROR',
-            errorContext
+            { originalError: error, outputPath }
         );
     }
 }
 
-// Update the processTextRow function to use the new font size update function
+// Add document initialization function
+async function ensureDocumentInitialized() {
+    try {
+        const doc = app.activeDocument;
+        if (!doc) {
+            throw new PluginError('No active document found', 'NO_ACTIVE_DOC');
+        }
+
+        // Check if document has a valid ID
+        if (!doc._id) {
+            log('[DEBUG] Document has no ID - performing initial save...');
+            
+            // Get the document name or use a default
+            const docName = doc.name || 'Untitled';
+            const timestamp = new Date().getTime();
+            const tempName = `${docName.replace('.psd', '')}_temp_${timestamp}.psd`;
+            
+            // Create temp folder if it doesn't exist
+            const tempFolder = await fs.getTemporaryFolder();
+            const savePath = `${tempFolder.nativePath}/${tempName}`;
+            
+            // Perform initial save to get document ID
+            const saveCommand = {
+                _obj: "save",
+                as: {
+                    _obj: "photoshop35Format",
+                    maximizeCompatibility: true
+                },
+                in: { _path: savePath },
+                copy: true,
+                lowerCase: true,
+                saveStages: {
+                    _enum: "saveStagesType",
+                    _value: "saveBegin"
+                },
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+
+            await batchPlay(
+                [saveCommand],
+                {
+                    synchronousExecution: true,
+                    modalBehavior: "none"
+                }
+            );
+
+            log(`[Cursor OK] Document initialized with temporary save: ${tempName}`);
+            
+            // Verify document now has ID
+            if (!app.activeDocument._id) {
+                throw new PluginError('Failed to initialize document ID', 'DOC_INIT_FAILED');
+            }
+
+            return true;
+        }
+
+        return true;
+    } catch (error) {
+        log(`[DEBUG] Document initialization failed: ${error.message}`);
+        throw new PluginError(
+            'Failed to initialize document',
+            'DOC_INIT_ERROR',
+            { originalError: error }
+        );
+    }
+}
+
+// Update processTextRow to use document initialization
 async function processTextRow(row, index, total, folders) {
     console.log("[DEBUG] Starting row processing:", {
         rowIndex: index,
@@ -1371,10 +1214,28 @@ async function processTextRow(row, index, total, folders) {
         timestamp: new Date().toISOString()
     });
 
+    // First ensure document is properly initialized
+    try {
+        await ensureDocumentInitialized();
+    } catch (error) {
+        log(`[DEBUG] Failed to initialize document: ${error.message}`);
+        throw error;
+    }
+
     const doc = app.activeDocument;
     if (!doc) {
         throw new PluginError('No active document found', 'NO_ACTIVE_DOC');
     }
+
+    // Get document info using the correct API v2 properties
+    const docInfo = {
+        id: doc._id,
+        name: doc.name || 'Untitled',
+        path: doc.path || null,
+        layerCount: doc.layers?.length || 0
+    };
+
+    log(`[DEBUG] Document initialized with ID: ${docInfo.id}`);
 
     const layers = doc.layers;
     const processingStart = Date.now();
@@ -1390,6 +1251,7 @@ async function processTextRow(row, index, total, folders) {
             
             console.log("[DEBUG] Layer analysis:", {
                 name: layer.name,
+                id: layer._id,  // Use _id for API v2
                 kind: layer.kind,
                 isTextLayer,
                 match,
@@ -1442,50 +1304,57 @@ async function processTextRow(row, index, total, folders) {
 
         // Only attempt saves if at least one layer was processed successfully
         if (layerUpdates.length > 0) {
-            const timestamp = Date.now();
-            const baseFileName = `output_${timestamp}_${index + 1}`;
-            const pngPath = `${folders.pngFolder.nativePath}/${baseFileName}.png`;
-            const psdPath = `${folders.psdFolder.nativePath}/${baseFileName}.psd`;
-
-            console.log("[DEBUG] Starting file saves:", {
-                png: pngPath,
-                psd: psdPath,
-                processedLayers: layerUpdates.length,
-                failedLayers: errors.length,
-                timestamp: new Date().toISOString()
-            });
-
-            // Save PNG first
             try {
+                // Get text content for filename
+                const text1Content = row.text1 || 'default';
+                const text2Content = row.text2 || '';
+                
+                // Create safe filename by removing invalid characters
+                const safeText1 = text1Content.replace(/[^a-zA-Z0-9]/g, '_');
+                const safeText2 = text2Content.replace(/[^a-zA-Z0-9]/g, '_');
+                
+                // Construct filename
+                const baseFileName = `${safeText1}_${safeText2}`.replace(/_+/g, '_').replace(/^_|_$/g, '');
+                
+                // Construct full paths
+                const pngPath = `${folders.pngFolder.nativePath}/${baseFileName}.png`;
+                const psdPath = `${folders.psdFolder.nativePath}/${baseFileName}.psd`;
+
+                log("[DEBUG] Starting file saves:", {
+                    filename: baseFileName,
+                    png: pngPath,
+                    psd: psdPath,
+                    text1: text1Content,
+                    text2: text2Content,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Save PNG
                 await saveAsPNG(doc, pngPath);
-                console.log("[DEBUG] PNG save completed successfully:", pngPath);
-            } catch (pngError) {
-                console.error("[DEBUG] PNG save failed:", {
-                    path: pngPath,
-                    error: pngError.message,
-                    code: pngError.code
-                });
-                errors.push({
-                    type: 'PNG_SAVE',
-                    error: pngError.message,
-                    code: pngError.code
-                });
-            }
+                log(`[DEBUG] ✅ PNG saved successfully: ${pngPath}`);
 
-            // Save PSD if PNG succeeded
-            try {
+                // Save PSD
                 await saveAsPSD(doc, psdPath);
-                console.log("[DEBUG] PSD save completed successfully:", psdPath);
-            } catch (psdError) {
-                console.error("[DEBUG] PSD save failed:", {
-                    path: psdPath,
-                    error: psdError.message,
-                    code: psdError.code
+                log(`[DEBUG] ✅ PSD saved successfully: ${psdPath}`);
+
+                // Write success to MCP relay
+                await writeToMCPRelay({
+                    command: "sendLog",
+                    message: `Files saved successfully for ${baseFileName}`,
+                    data: {
+                        filename: baseFileName,
+                        png: pngPath,
+                        psd: psdPath,
+                        timestamp: new Date().toISOString()
+                    }
                 });
+
+            } catch (saveError) {
+                log(`[DEBUG] ❌ Save operation failed: ${saveError.message}`);
                 errors.push({
-                    type: 'PSD_SAVE',
-                    error: psdError.message,
-                    code: psdError.code
+                    type: 'SAVE_ERROR',
+                    error: saveError.message,
+                    code: saveError.code
                 });
             }
         }
@@ -1523,7 +1392,7 @@ async function processTextRow(row, index, total, folders) {
     }
 }
 
-// Enhanced Image Row Processing with Progress Tracking
+// Update processImageRow to use document initialization
 async function processImageRow(row, index, total) {
     if (!row || index === undefined || total === undefined) {
         throw new PluginError(
@@ -1532,6 +1401,9 @@ async function processImageRow(row, index, total) {
             { index, total, hasRow: !!row }
         );
     }
+
+    // Ensure document is initialized before processing
+    await ensureDocumentInitialized();
 
     const doc = app.activeDocument;
     if (!doc) {
@@ -1616,6 +1488,16 @@ async function processTextReplacement() {
             throw new PluginError('No active document found', 'NO_DOCUMENT');
         }
 
+        // Initialize document once at the start
+        textStatus.textContent = 'Initializing document...';
+        try {
+            await ensureDocumentInitialized();
+            log('[DEBUG] Document initialized successfully');
+        } catch (initError) {
+            log(`[DEBUG] Document initialization failed: ${initError.message}`);
+            throw initError;
+        }
+
         // Update state and UI
         textReplaceState.status.isProcessing = true;
         textReplaceState.status.currentOperation = 'text_replacement';
@@ -1644,17 +1526,12 @@ async function processTextReplacement() {
                     throw new PluginError('No data in first row', 'EMPTY_ROW');
                 }
                 
-                console.log("[DEBUG] Processing single row:", {
-                    rowData: currentRow,
-                    timestamp: new Date().toISOString()
-                });
-                
                 await processTextRow(currentRow, 0, 1, folders);
                 textStatus.textContent = 'Current row processed successfully';
                 
             } else {
                 const total = textReplaceState.data.csvData.length;
-                console.log("[DEBUG] Starting batch processing:", {
+                log("[DEBUG] Starting batch processing:", {
                     totalRows: total,
                     timestamp: new Date().toISOString()
                 });
@@ -1665,43 +1542,14 @@ async function processTextReplacement() {
                         throw new PluginError(`Empty row at index ${i}`, 'EMPTY_ROW');
                     }
                     
-                    // Update UI with progress
                     textStatus.textContent = `Processing row ${i + 1} of ${total}...`;
-                    
-                    try {
-                        await processTextRow(row, i, total, folders);
-                        
-                        // Log progress
-                        console.log("[DEBUG] Row completed successfully:", {
-                            rowIndex: i,
-                            totalRows: total,
-                            progress: Math.round(((i + 1) / total) * 100)
-                        });
-                        
-                    } catch (rowError) {
-                        // If row processing fails, stop the entire process
-                        console.error("[DEBUG] Row processing failed - stopping batch:", {
-                            rowIndex: i,
-                            error: rowError
-                        });
-                        
-                        throw new PluginError(
-                            `Failed at row ${i + 1}/${total}`,
-                            'BATCH_PROCESSING_HALTED',
-                            {
-                                originalError: rowError,
-                                rowIndex: i,
-                                totalRows: total
-                            }
-                        );
-                    }
+                    await processTextRow(row, i, total, folders);
                 }
                 textStatus.textContent = 'All rows processed successfully';
             }
 
             const duration = Date.now() - startTime;
             
-            // Write completion log to MCP relay
             await writeToMCPRelay({
                 command: "sendLog",
                 message: `Text replacement completed successfully. Type: ${processType}`,
@@ -1722,43 +1570,17 @@ async function processTextReplacement() {
             log(`[Cursor OK] Files saved to:`);
             log(`  PNG folder: ${folders.pngFolder.nativePath}`);
             log(`  PSD folder: ${folders.psdFolder.nativePath}`);
-            
-        } catch (processingError) {
-            // Handle processing errors with specific UI updates
-            console.error("[DEBUG] Processing failed:", processingError);
-            
-            // Update UI with specific error message
-            let errorMessage = 'Processing failed';
-            switch (processingError.code) {
-                case 'LAYER_PROCESS_ERROR':
-                    errorMessage = `Failed to process layer: ${processingError.details?.layer}`;
-                    break;
-                case 'PNG_SAVE_HALT':
-                    errorMessage = 'Failed to save PNG - process stopped';
-                    break;
-                case 'PSD_SAVE_HALT':
-                    errorMessage = 'Failed to save PSD - process stopped';
-                    break;
-                case 'BATCH_PROCESSING_HALTED':
-                    errorMessage = `Processing stopped at row ${processingError.details?.rowIndex + 1}`;
-                    break;
-                default:
-                    errorMessage = processingError.message;
-            }
-            
-            textStatus.textContent = errorMessage;
-            throw processingError; // Re-throw to be caught by outer catch
+        } catch (error) {
+            console.error("[DEBUG] Text replacement error:", error);
+            throw error;
         }
-        
     } catch (error) {
-        await handleError(error, 'text');
-    } finally {
-        textReplaceState.status.isProcessing = false;
-        textReplaceState.status.currentOperation = null;
+        console.error("[DEBUG] Text replacement error:", error);
+        throw error;
     }
 }
 
-// Update processImageReplacement to use image-specific folder setup
+// Update processImageReplacement to use document initialization
 async function processImageReplacement() {
     const imageStatus = document.getElementById('imageStatus');
     const processType = document.querySelector('input[name="processTypeImg"]:checked')?.value;
@@ -2008,101 +1830,3 @@ document.addEventListener('DOMContentLoaded', () => {
         log(`[Cursor OK] MCP relay write failed: ${error.message}`);
     });
 });
-
-// Modify error handling in other functions to use log instead of showing prompts
-async function handleError(error, context) {
-    const errorMessage = `[Cursor OK] ${context} error: ${error.message}`;
-    log(errorMessage);
-    
-    // Write to MCP relay without showing prompts
-    writeToMCPRelay({
-        command: "sendError",
-        error: {
-            message: error.message,
-            code: error.code,
-            details: error.details
-        },
-        timestamp: new Date().toISOString()
-    }).catch(mcpError => {
-        log(`[Cursor OK] MCP relay write failed: ${mcpError.message}`);
-    });
-}
-
-// Update manifest version
-const manifest = {
-    "id": "com.saveonpeptides.autoreplace",
-    "name": "SaveOnPeptides Auto Replace",
-    "version": "1.0.0",
-    "main": "index.js",
-    "host": {
-        "app": "PS",
-        "minVersion": "22.0.0"
-    },
-    "manifestVersion": 4,
-    "requiredPermissions": {
-        "allowCodeGenerationFromStrings": true,
-        "launchProcess": {
-            "schemes": ["http", "https"],
-            "extensions": [".exe", ".bat", ".cmd"]
-        },
-        "network": {
-            "domains": ["localhost"]
-        },
-        "clipboard": "readAndWrite",
-        "fs": "readWrite",
-        "webview": {
-            "allow": "yes",
-            "domains": ["https://*.adobe.com"]
-        }
-    },
-    "entrypoints": [
-        {
-            "type": "panel",
-            "id": "vanilla",
-            "label": {
-                "default": "SaveOnPeptides Auto Replace"
-            },
-            "minimumSize": {
-                "width": 230,
-                "height": 200
-            },
-            "maximumSize": {
-                "width": 2000,
-                "height": 2000
-            },
-            "preferredDockedSize": {
-                "width": 230,
-                "height": 300
-            },
-            "preferredFloatingSize": {
-                "width": 230,
-                "height": 300
-            },
-            "icons": [
-                {
-                    "width": 23,
-                    "height": 23,
-                    "path": "icons/dark.png",
-                    "scale": [1, 2],
-                    "theme": ["darkest", "dark", "medium"]
-                },
-                {
-                    "width": 23,
-                    "height": 23,
-                    "path": "icons/light.png",
-                    "scale": [1, 2],
-                    "theme": ["lightest", "light"]
-                }
-            ]
-        }
-    ],
-    "icons": [
-        {
-            "width": 48,
-            "height": 48,
-            "path": "icons/plugin.png",
-            "scale": [1, 2]
-        }
-    ],
-    "apiVersion": 2
-};
