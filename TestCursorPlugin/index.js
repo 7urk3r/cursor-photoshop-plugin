@@ -735,122 +735,122 @@ async function replaceImage(layer, imagePath) {
 }
 
 // Enhanced folder setup with verification and conditional creation
-async function setupTextOutputFolders(outputFolder) {
+async function setupTextOutputFolders() {
+    log('[DEBUG] Setting up text output folders');
+    
     try {
-        if (!outputFolder) {
-            throw new PluginError('Output folder not selected', 'FOLDER_NOT_SELECTED');
-        }
-
-        console.log("[DEBUG] Checking output folders in:", outputFolder.nativePath);
-        const folders = {};
+        const fs = require('uxp').storage.localFileSystem;
         
-        // Store the base output folder
-        folders.baseFolder = outputFolder;
+        // Get desktop folder as base location
+        const desktop = await fs.getFolder(fs.domains.userDesktop);
+        log(`[DEBUG] Got desktop folder: ${desktop.nativePath}`);
         
-        // Check PNG folder, create if not exists
+        // Create main output folder
+        let mainFolder;
         try {
-            console.log("[DEBUG] Checking Text_PNG folder...");
-            try {
-                folders.pngFolder = await outputFolder.getEntry('Text_PNG');
-                if (!folders.pngFolder.isFolder) {
-                    throw new Error('Text_PNG exists but is not a folder');
-                }
-                console.log("[DEBUG] Found existing Text_PNG folder:", folders.pngFolder.nativePath);
-            } catch (notFoundError) {
-                // If the folder doesn't exist, create it
-                console.log("[DEBUG] Text_PNG folder not found, creating new one...");
-                folders.pngFolder = await outputFolder.createEntry('Text_PNG', { type: 'folder' });
-                console.log("[DEBUG] Created new Text_PNG folder:", folders.pngFolder.nativePath);
-            }
-            
-            // Verify the folder was created
-            if (!folders.pngFolder || !folders.pngFolder.isFolder) {
-                throw new PluginError('Failed to create PNG folder', 'FOLDER_CREATE_ERROR');
-            }
-        } catch (error) {
-            console.error("[DEBUG] Error with PNG folder:", error);
-            throw new PluginError(
-                'Failed to create Text_PNG folder',
-                'FOLDER_CREATE_ERROR',
-                { path: 'Text_PNG', error }
-            );
+            mainFolder = await desktop.getEntry('SaveOnPeptides_Output');
+            log(`[DEBUG] Found existing main output folder: ${mainFolder.nativePath}`);
+        } catch (e) {
+            log(`[DEBUG] Creating main output folder on desktop`);
+            mainFolder = await desktop.createFolder('SaveOnPeptides_Output');
+            log(`[DEBUG] Created main output folder: ${mainFolder.nativePath}`);
         }
         
-        // Check PSD folder, create if not exists
-        try {
-            console.log("[DEBUG] Checking Text_PSD folder...");
-            try {
-                folders.psdFolder = await outputFolder.getEntry('Text_PSD');
-                if (!folders.psdFolder.isFolder) {
-                    throw new Error('Text_PSD exists but is not a folder');
-                }
-                console.log("[DEBUG] Found existing Text_PSD folder:", folders.psdFolder.nativePath);
-            } catch (notFoundError) {
-                // If the folder doesn't exist, create it
-                console.log("[DEBUG] Text_PSD folder not found, creating new one...");
-                folders.psdFolder = await outputFolder.createEntry('Text_PSD', { type: 'folder' });
-                console.log("[DEBUG] Created new Text_PSD folder:", folders.psdFolder.nativePath);
-            }
-            
-            // Verify the folder was created
-            if (!folders.psdFolder || !folders.psdFolder.isFolder) {
-                throw new PluginError('Failed to create PSD folder', 'FOLDER_CREATE_ERROR');
-            }
-        } catch (error) {
-            console.error("[DEBUG] Error with PSD folder:", error);
-            throw new PluginError(
-                'Failed to create Text_PSD folder',
-                'FOLDER_CREATE_ERROR',
-                { path: 'Text_PSD', error }
-            );
-        }
-
-        // Verify both folders are accessible
-        try {
-            const pngExists = await folders.pngFolder.isEntry;
-            const psdExists = await folders.psdFolder.isEntry;
-            
-            if (!pngExists || !psdExists) {
-                throw new PluginError(
-                    'Could not verify folder access', 
-                    'FOLDER_ACCESS_ERROR',
-                    {
-                        pngExists,
-                        psdExists,
-                        pngPath: folders.pngFolder?.nativePath,
-                        psdPath: folders.psdFolder?.nativePath
-                    }
-                );
-            }
-        } catch (verifyError) {
-            console.error("[DEBUG] Folder verification failed:", verifyError);
-            throw new PluginError(
-                'Failed to verify folder access', 
-                'FOLDER_VERIFY_ERROR',
-                { error: verifyError }
-            );
-        }
-
-        // Ensure native paths are properly formatted for M1 Macs
-        folders.pngNativePath = folders.pngFolder.nativePath.replace(/\\/g, '/');
-        folders.psdNativePath = folders.psdFolder.nativePath.replace(/\\/g, '/');
-
-        console.log("[DEBUG] Output folders ready:", {
-            png: folders.pngNativePath,
-            psd: folders.psdNativePath
-        });
+        // Create timestamped subfolder for this session
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+        const sessionFolderName = `Session_${timestamp}`;
         
-        return folders;
+        let sessionFolder;
+        try {
+            sessionFolder = await mainFolder.getEntry(sessionFolderName);
+            log(`[DEBUG] Found existing session folder: ${sessionFolder.nativePath}`);
+        } catch (e) {
+            log(`[DEBUG] Creating new session folder: ${sessionFolderName}`);
+            sessionFolder = await mainFolder.createFolder(sessionFolderName);
+            log(`[DEBUG] Created session folder: ${sessionFolder.nativePath}`);
+        }
+        
+        // Create PNG output folder
+        let pngFolder;
+        try {
+            pngFolder = await sessionFolder.getEntry('PNG_Output');
+            log(`[DEBUG] Found existing PNG output folder: ${pngFolder.nativePath}`);
+        } catch (e) {
+            log(`[DEBUG] Creating PNG output folder`);
+            pngFolder = await sessionFolder.createFolder('PNG_Output');
+            log(`[DEBUG] Created PNG output folder: ${pngFolder.nativePath}`);
+        }
+        
+        // Create PSD output folder
+        let psdFolder;
+        try {
+            psdFolder = await sessionFolder.getEntry('PSD_Output');
+            log(`[DEBUG] Found existing PSD output folder: ${psdFolder.nativePath}`);
+        } catch (e) {
+            log(`[DEBUG] Creating PSD output folder`);
+            psdFolder = await sessionFolder.createFolder('PSD_Output');
+            log(`[DEBUG] Created PSD output folder: ${psdFolder.nativePath}`);
+        }
+        
+        // Create MCP relay folder for external monitoring
+        let mcpFolder;
+        try {
+            mcpFolder = await sessionFolder.getEntry('MCP_Relay');
+            log(`[DEBUG] Found existing MCP relay folder: ${mcpFolder.nativePath}`);
+        } catch (e) {
+            log(`[DEBUG] Creating MCP relay folder`);
+            mcpFolder = await sessionFolder.createFolder('MCP_Relay');
+            log(`[DEBUG] Created MCP relay folder: ${mcpFolder.nativePath}`);
+        }
+        
+        // Verify folder permissions by writing test files
+        try {
+            log(`[DEBUG] Verifying folder write permissions with test files`);
+            
+            // Test PNG folder
+            const pngTestFile = await pngFolder.createFile('test.txt', { overwrite: true });
+            await pngTestFile.write('test');
+            await pngTestFile.delete();
+            log(`[DEBUG] ✅ PNG folder write test passed`);
+            
+            // Test PSD folder
+            const psdTestFile = await psdFolder.createFile('test.txt', { overwrite: true });
+            await psdTestFile.write('test');
+            await psdTestFile.delete();
+            log(`[DEBUG] ✅ PSD folder write test passed`);
+            
+            // Test MCP folder
+            const mcpTestFile = await mcpFolder.createFile('test.txt', { overwrite: true });
+            await mcpTestFile.write('test');
+            await mcpTestFile.delete();
+            log(`[DEBUG] ✅ MCP folder write test passed`);
+        } catch (testError) {
+            log(`[DEBUG] ❌ Folder permission test failed: ${testError.message}`);
+            // Continue anyway, we'll handle errors during actual file operations
+        }
+        
+        // Store native paths for easier access
+        const pngNativePath = pngFolder.nativePath;
+        const psdNativePath = psdFolder.nativePath;
+        const mcpNativePath = mcpFolder.nativePath;
+        
+        // Log the paths in a format suitable for M1 Mac
+        log(`[DEBUG] Output folders setup complete:`);
+        log(`[DEBUG] - PNG output: ${pngNativePath.replace(/\\/g, '/')}`);
+        log(`[DEBUG] - PSD output: ${psdNativePath.replace(/\\/g, '/')}`);
+        log(`[DEBUG] - MCP relay: ${mcpNativePath.replace(/\\/g, '/')}`);
+        
+        return {
+            pngFolder,
+            psdFolder,
+            mcpFolder,
+            pngNativePath: pngNativePath.replace(/\\/g, '/'),
+            psdNativePath: psdNativePath.replace(/\\/g, '/'),
+            mcpNativePath: mcpNativePath.replace(/\\/g, '/')
+        };
     } catch (error) {
-        console.error("[DEBUG] Folder setup failed:", error);
-        throw new PluginError(
-            'Failed to setup output folders', 
-            'FOLDER_SETUP_ERROR', 
-            { 
-                error,
-                outputPath: outputFolder?.nativePath 
-            }
-        );
+        log(`[DEBUG] ❌ Failed to setup output folders: ${error.message}`);
+        throw new PluginError('Failed to setup output folders', 'FOLDER_SETUP_ERROR', error);
     }
 }
 
@@ -1066,43 +1066,100 @@ async function saveAsPNG(doc, outputPath) {
     try {
         log(`[DEBUG] Starting PNG save to: ${outputPath}`);
         
-        // Determine if we're dealing with a path or a token
-        const isPath = typeof outputPath === 'string' && outputPath.includes('/');
+        // Check if we're dealing with a file token or a path string
+        const isToken = typeof outputPath !== 'string';
         
-        // For M1 Mac compatibility, use the simplest possible approach
-        const saveDesc = {
-            _obj: "save",
-            as: {
-                _obj: "PNGFormat",
-                PNG8: false,
-                transparency: true
-            },
-            in: { _path: outputPath },
-            copy: true,
-            _options: { 
-                dialogOptions: "dontDisplay"
-            }
-        };
-
-        log(`[DEBUG] Executing PNG save command with ${isPath ? 'path' : 'token'}...`);
+        // For debugging
+        log(`[DEBUG] Save PNG using ${isToken ? 'token' : 'path string'}: ${isToken ? 'File Token' : outputPath}`);
         
-        const result = await batchPlay(
-            [saveDesc],
-            {
-                synchronousExecution: true,
-                modalBehavior: "none"
-            }
-        );
-
-        log(`[DEBUG] PNG Save completed successfully`);
-        return result;
-
-    } catch (error) {
-        log(`[DEBUG] PNG Save Failed: ${error.message}`);
-        
-        // Try with exportDocument instead
+        // APPROACH 1: Use direct file system API for most reliable method
         try {
-            log(`[DEBUG] Attempting exportDocument method...`);
+            log(`[DEBUG] APPROACH 1: Attempting direct file system API save...`);
+            
+            const fs = require('uxp').storage.localFileSystem;
+            const formats = require('uxp').storage.formats;
+            
+            // Parse the path to get directory and filename if it's a string path
+            let outputFile;
+            if (!isToken) {
+                try {
+                    // Extract directory path and filename
+                    const pathParts = outputPath.split('/');
+                    const fileName = pathParts.pop();
+                    const dirPath = pathParts.join('/');
+                    
+                    log(`[DEBUG] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
+                    
+                    // Get the directory
+                    const directory = await fs.getFolder(dirPath);
+                    log(`[DEBUG] Got directory: ${directory.nativePath}`);
+                    
+                    // Create or get the file
+                    outputFile = await directory.createFile(fileName, { overwrite: true });
+                    log(`[DEBUG] Created output file: ${outputFile.nativePath}`);
+                } catch (parseError) {
+                    log(`[DEBUG] Path parsing error: ${parseError.message}`);
+                    throw parseError;
+                }
+            } else {
+                outputFile = outputPath;
+                log(`[DEBUG] Using provided file token`);
+            }
+            
+            // Save to temporary file first
+            log(`[DEBUG] Creating temporary file for PNG save...`);
+            const tempFile = await fs.createTemporaryFile("temp-png-");
+            log(`[DEBUG] Created temp file: ${tempFile.nativePath}`);
+            
+            // Create a session token for the temp file
+            const tempToken = fs.createSessionToken(tempFile);
+            
+            // Use exportDocument to save to temp file
+            log(`[DEBUG] Exporting document to temp file...`);
+            const exportDesc = {
+                _obj: "exportDocument",
+                documentID: doc._id,
+                format: {
+                    _obj: "PNG",
+                    PNG8: false,
+                    transparency: true,
+                    interlaced: false,
+                    quality: 100
+                },
+                in: tempToken,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+            
+            await batchPlay([exportDesc], { synchronousExecution: true });
+            log(`[DEBUG] Successfully exported to temp file`);
+            
+            // Read temp file content
+            log(`[DEBUG] Reading temp file content...`);
+            const tempContent = await tempFile.read({ format: formats.binary });
+            log(`[DEBUG] Read ${tempContent.byteLength} bytes from temp file`);
+            
+            // Write content to final destination
+            log(`[DEBUG] Writing content to final destination...`);
+            await outputFile.write(tempContent, { format: formats.binary });
+            log(`[DEBUG] ✅ Successfully wrote PNG file: ${outputFile.nativePath}`);
+            
+            // Clean up temp file
+            await tempFile.delete();
+            log(`[DEBUG] Cleaned up temp file`);
+            
+            return { success: true, method: "direct-fs", path: outputFile.nativePath };
+        } catch (directFsError) {
+            log(`[DEBUG] Direct file system approach failed: ${directFsError.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(directFsError)}`);
+            
+            // Continue to next approach
+        }
+        
+        // APPROACH 2: Use exportDocument with modern format
+        try {
+            log(`[DEBUG] APPROACH 2: Attempting exportDocument method...`);
             
             const exportDesc = {
                 _obj: "exportDocument",
@@ -1114,7 +1171,7 @@ async function saveAsPNG(doc, outputPath) {
                     interlaced: false,
                     quality: 100
                 },
-                _path: outputPath,
+                in: isToken ? outputPath : { _path: outputPath },
                 _options: { 
                     dialogOptions: "dontDisplay"
                 }
@@ -1128,22 +1185,243 @@ async function saveAsPNG(doc, outputPath) {
                 }
             );
             
-            log(`[DEBUG] Export PNG Save completed successfully`);
-            return exportResult;
-            
+            log(`[DEBUG] ✅ Export PNG Save completed successfully`);
+            return { success: true, method: "exportDocument", result: exportResult };
         } catch (exportError) {
-            log(`[DEBUG] Export PNG Save also failed: ${exportError.message}`);
+            log(`[DEBUG] Export PNG Save failed: ${exportError.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(exportError)}`);
             
-            // Try one more approach - the most basic one
+            // Continue to next approach
+        }
+        
+        // APPROACH 3: Use basic save with minimal options
+        try {
+            log(`[DEBUG] APPROACH 3: Attempting basic save method...`);
+            
+            const saveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "PNGFormat",
+                    PNG8: false
+                },
+                in: isToken ? outputPath : { _path: outputPath },
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+            
+            const saveResult = await batchPlay(
+                [saveDesc],
+                {
+                    synchronousExecution: true,
+                    modalBehavior: "none"
+                }
+            );
+            
+            log(`[DEBUG] ✅ Basic PNG Save completed successfully`);
+            return { success: true, method: "basicSave", result: saveResult };
+        } catch (saveError) {
+            log(`[DEBUG] Basic PNG Save failed: ${saveError.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(saveError)}`);
+            
+            // Continue to next approach
+        }
+        
+        // APPROACH 4: Use quickExport
+        try {
+            log(`[DEBUG] APPROACH 4: Attempting quickExport method...`);
+            
+            const quickExportDesc = {
+                _obj: "quickExport",
+                format: {
+                    _enum: "exportFormat",
+                    _value: "PNG"
+                },
+                destination: {
+                    _enum: "saveStageType",
+                    _value: "saveStageType"
+                },
+                in: isToken ? outputPath : { _path: outputPath },
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+            
+            const quickExportResult = await batchPlay(
+                [quickExportDesc],
+                {
+                    synchronousExecution: true,
+                    modalBehavior: "none"
+                }
+            );
+            
+            log(`[DEBUG] ✅ QuickExport PNG Save completed successfully`);
+            return { success: true, method: "quickExport", result: quickExportResult };
+        } catch (quickExportError) {
+            log(`[DEBUG] QuickExport PNG Save failed: ${quickExportError.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(quickExportError)}`);
+            
+            // All approaches failed
+            throw new PluginError(
+                'All PNG save methods failed',
+                'PNG_SAVE_ERROR',
+                { 
+                    directFsError: directFsError?.message,
+                    exportError: exportError?.message,
+                    saveError: saveError?.message,
+                    quickExportError: quickExportError?.message,
+                    outputPath 
+                }
+            );
+        }
+    } catch (error) {
+        log(`[DEBUG] PNG Save Failed with critical error: ${error.message}`);
+        log(`[DEBUG] Stack trace: ${error.stack}`);
+        throw error;
+    }
+}
+
+// Updated PSD save function with proper API v2 format
+async function saveAsPSD(doc, outputPath) {
+    try {
+        log(`[DEBUG] Starting PSD save to: ${outputPath}`);
+        
+        // Check if we're dealing with a file token or a path string
+        const isToken = typeof outputPath !== 'string';
+        
+        // For debugging
+        log(`[DEBUG] Save PSD using ${isToken ? 'token' : 'path string'}: ${isToken ? 'File Token' : outputPath}`);
+        
+        // APPROACH 1: Use direct file system API for most reliable method
+        try {
+            log(`[DEBUG] APPROACH 1: Attempting direct file system API save for PSD...`);
+            
+            const fs = require('uxp').storage.localFileSystem;
+            const formats = require('uxp').storage.formats;
+            
+            // Parse the path to get directory and filename if it's a string path
+            let outputFile;
+            if (!isToken) {
+                try {
+                    // Extract directory path and filename
+                    const pathParts = outputPath.split('/');
+                    const fileName = pathParts.pop();
+                    const dirPath = pathParts.join('/');
+                    
+                    log(`[DEBUG] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
+                    
+                    // Get the directory
+                    const directory = await fs.getFolder(dirPath);
+                    log(`[DEBUG] Got directory: ${directory.nativePath}`);
+                    
+                    // Create or get the file
+                    outputFile = await directory.createFile(fileName, { overwrite: true });
+                    log(`[DEBUG] Created output file: ${outputFile.nativePath}`);
+                } catch (parseError) {
+                    log(`[DEBUG] Path parsing error: ${parseError.message}`);
+                    throw parseError;
+                }
+            } else {
+                outputFile = outputPath;
+                log(`[DEBUG] Using provided file token`);
+            }
+            
+            // Save to temporary file first
+            log(`[DEBUG] Creating temporary file for PSD save...`);
+            const tempFile = await fs.createTemporaryFile("temp-psd-");
+            log(`[DEBUG] Created temp file: ${tempFile.nativePath}`);
+            
+            // Create a session token for the temp file
+            const tempToken = fs.createSessionToken(tempFile);
+            
+            // Use save to save to temp file
+            log(`[DEBUG] Saving document to temp file...`);
+            const saveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "photoshop35Format",
+                    alphaChannels: true,
+                    embedColorProfile: true,
+                    layers: true,
+                    maximizeCompatibility: true
+                },
+                in: tempToken,
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+            
+            await batchPlay([saveDesc], { synchronousExecution: true });
+            log(`[DEBUG] Successfully saved to temp file`);
+            
+            // Read temp file content
+            log(`[DEBUG] Reading temp file content...`);
+            const tempContent = await tempFile.read({ format: formats.binary });
+            log(`[DEBUG] Read ${tempContent.byteLength} bytes from temp file`);
+            
+            // Write content to final destination
+            log(`[DEBUG] Writing content to final destination...`);
+            await outputFile.write(tempContent, { format: formats.binary });
+            log(`[DEBUG] ✅ Successfully wrote PSD file: ${outputFile.nativePath}`);
+            
+            // Clean up temp file
+            await tempFile.delete();
+            log(`[DEBUG] Cleaned up temp file`);
+            
+            return { success: true, method: "direct-fs", path: outputFile.nativePath };
+        } catch (directFsError) {
+            log(`[DEBUG] Direct file system approach failed for PSD: ${directFsError.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(directFsError)}`);
+            
+            // Continue to next approach
+        }
+        
+        // APPROACH 2: Use standard save
+        try {
+            log(`[DEBUG] APPROACH 2: Attempting standard PSD save method...`);
+            
+            const saveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "photoshop35Format",
+                    alphaChannels: true,
+                    embedColorProfile: true,
+                    layers: true,
+                    maximizeCompatibility: true
+                },
+                in: isToken ? outputPath : { _path: outputPath },
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+
+            const result = await batchPlay(
+                [saveDesc],
+                {
+                    synchronousExecution: true,
+                    modalBehavior: "none"
+                }
+            );
+
+            log(`[DEBUG] ✅ PSD Save completed successfully`);
+            return { success: true, method: "standardSave", result };
+        } catch (error) {
+            log(`[DEBUG] Standard PSD Save Failed: ${error.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(error)}`);
+            
+            // Try basic approach
             try {
-                log(`[DEBUG] Attempting basic save method...`);
+                log(`[DEBUG] APPROACH 3: Attempting basic PSD save method...`);
                 
                 const basicSaveDesc = {
                     _obj: "save",
                     as: {
-                        _obj: "PNGFormat"
+                        _obj: "photoshop35Format"
                     },
-                    in: { _path: outputPath },
+                    in: isToken ? outputPath : { _path: outputPath },
                     copy: true,
                     _options: { 
                         dialogOptions: "dontDisplay"
@@ -1158,106 +1436,27 @@ async function saveAsPNG(doc, outputPath) {
                     }
                 );
                 
-                log(`[DEBUG] Basic PNG Save completed successfully`);
-                return basicResult;
-                
+                log(`[DEBUG] ✅ Basic PSD Save completed successfully`);
+                return { success: true, method: "basicSave", result: basicResult };
             } catch (basicError) {
-                log(`[DEBUG] All PNG save methods failed`);
+                log(`[DEBUG] All PSD save methods failed`);
+                log(`[DEBUG] Error details: ${JSON.stringify(basicError)}`);
                 throw new PluginError(
-                    'Failed to save PNG (all methods failed)',
-                    'PNG_SAVE_ERROR',
+                    'Failed to save PSD (all methods failed)',
+                    'PSD_SAVE_ERROR',
                     { 
-                        originalError: error, 
-                        exportError,
-                        basicError,
+                        directFsError: directFsError?.message,
+                        standardError: error.message, 
+                        basicError: basicError.message,
                         outputPath 
                     }
                 );
             }
         }
-    }
-}
-
-// Updated PSD save function with proper API v2 format
-async function saveAsPSD(doc, outputPath) {
-    try {
-        log(`[DEBUG] Starting PSD save to: ${outputPath}`);
-        
-        // Determine if we're dealing with a path or a token
-        const isPath = typeof outputPath === 'string' && outputPath.includes('/');
-        
-        // For M1 Mac compatibility, use the simplest possible approach
-        const saveDesc = {
-            _obj: "save",
-            as: {
-                _obj: "photoshop35Format",
-                alphaChannels: true,
-                embedColorProfile: true,
-                layers: true,
-                maximizeCompatibility: true
-            },
-            in: { _path: outputPath },
-            copy: true,
-            _options: { 
-                dialogOptions: "dontDisplay"
-            }
-        };
-
-        log(`[DEBUG] Executing PSD save command with ${isPath ? 'path' : 'token'}...`);
-        
-        const result = await batchPlay(
-            [saveDesc],
-            {
-                synchronousExecution: true,
-                modalBehavior: "none"
-            }
-        );
-
-        log(`[DEBUG] PSD Save completed successfully`);
-        return result;
-
     } catch (error) {
-        log(`[DEBUG] PSD Save Failed: ${error.message}`);
-        
-        // Try basic approach
-        try {
-            log(`[DEBUG] Attempting basic PSD save method...`);
-            
-            const basicSaveDesc = {
-                _obj: "save",
-                as: {
-                    _obj: "photoshop35Format"
-                },
-                in: { _path: outputPath },
-                copy: true,
-                _options: { 
-                    dialogOptions: "dontDisplay"
-                }
-            };
-            
-            const basicResult = await batchPlay(
-                [basicSaveDesc],
-                {
-                    synchronousExecution: true,
-                    modalBehavior: "none"
-                }
-            );
-            
-            log(`[DEBUG] Basic PSD Save completed successfully`);
-            return basicResult;
-            
-        } catch (basicError) {
-            log(`[DEBUG] All PSD save methods failed`);
-            throw new PluginError(
-                'Failed to save PSD (all methods failed)',
-                'PSD_SAVE_ERROR',
-                { 
-                    originalError: error, 
-                    basicError,
-                    outputPath 
-                }
-            );
-        }
+        log(`[DEBUG] PSD Save Failed with critical error: ${error.message}`);
+        log(`[DEBUG] Stack trace: ${error.stack}`);
+        throw error;
     }
 }
 
@@ -1399,6 +1598,7 @@ async function processTextRow(row, index, total, folders) {
     const processingStart = Date.now();
     const layerUpdates = [];
     const errors = [];
+    let filesSaved = { png: false, psd: false };
 
     try {
         // First pass: identify text layers with enhanced logging
@@ -1470,11 +1670,21 @@ async function processTextRow(row, index, total, folders) {
                 // Generate filenames for output
                 const baseFileName = `${text1Content}_${text2Content}`.replace(/[^a-zA-Z0-9]/g, '_');
                 
-                // Use the normalized paths for M1 compatibility
-                const pngPath = `${folders.pngNativePath || folders.pngFolder.nativePath}/${baseFileName}.png`;
-                const psdPath = `${folders.psdNativePath || folders.psdFolder.nativePath}/${baseFileName}.psd`;
+                // Ensure we have valid folder paths
+                if (!folders || !folders.pngFolder || !folders.psdFolder) {
+                    log(`[DEBUG] ❌ Invalid folder structure for saving: ${JSON.stringify(folders)}`);
+                    throw new Error('Invalid folder structure for saving');
+                }
+                
+                // Get native paths with proper formatting
+                const pngNativePath = folders.pngNativePath || folders.pngFolder.nativePath;
+                const psdNativePath = folders.psdNativePath || folders.psdFolder.nativePath;
+                
+                // Ensure paths are properly formatted for M1 Mac
+                const pngPath = `${pngNativePath.replace(/\\/g, '/')}/${baseFileName}.png`;
+                const psdPath = `${psdNativePath.replace(/\\/g, '/')}/${baseFileName}.psd`;
 
-                log("[DEBUG] Starting file saves:", {
+                log("[DEBUG] Starting file saves for row " + index + ":", {
                     filename: baseFileName,
                     png: pngPath,
                     psd: psdPath,
@@ -1483,171 +1693,150 @@ async function processTextRow(row, index, total, folders) {
                     timestamp: new Date().toISOString()
                 });
 
-                // Create file entries first
-                let pngFile, psdFile;
+                // Save PNG file with explicit error handling
+                let pngSaveResult = null;
+                let pngSaved = false;
                 try {
-                    // Create PNG file entry
-                    log(`[DEBUG] Attempting to create PNG file entry in folder: ${folders.pngFolder.nativePath}`);
-                    pngFile = await folders.pngFolder.createFile(`${baseFileName}.png`, { overwrite: true });
-                    log(`[DEBUG] Created PNG file entry: ${pngFile.nativePath}`);
+                    log(`[DEBUG] Saving PNG file to: ${pngPath}`);
+                    pngSaveResult = await saveAsPNG(doc, pngPath);
+                    log(`[DEBUG] ✅ PNG save result: ${JSON.stringify(pngSaveResult)}`);
+                    pngSaved = true;
+                    filesSaved.png = true;
+                } catch (pngError) {
+                    log(`[DEBUG] ❌ PNG save failed with error: ${pngError.message}`);
+                    log(`[DEBUG] Error details: ${JSON.stringify(pngError)}`);
                     
-                    // Create PSD file entry
-                    log(`[DEBUG] Attempting to create PSD file entry in folder: ${folders.psdFolder.nativePath}`);
-                    psdFile = await folders.psdFolder.createFile(`${baseFileName}.psd`, { overwrite: true });
-                    log(`[DEBUG] Created PSD file entry: ${psdFile.nativePath}`);
-                } catch (fileCreateError) {
-                    log(`[DEBUG] Error creating file entries: ${fileCreateError.message}`);
-                    log(`[DEBUG] Error details: ${JSON.stringify(fileCreateError)}`);
-                    // Continue with path-based approach as fallback
+                    // Add to errors but continue with PSD save
+                    errors.push({
+                        type: 'PNG_SAVE',
+                        error: pngError.message,
+                        path: pngPath
+                    });
                 }
 
-                // Save PNG - use file entry if available, otherwise use path
+                // Save PSD file with explicit error handling
+                let psdSaveResult = null;
+                let psdSaved = false;
                 try {
-                    if (pngFile) {
-                        const fs = require('uxp').storage.localFileSystem;
-                        const pngToken = fs.createSessionToken(pngFile);
-                        log(`[DEBUG] Created session token for PNG file, now saving...`);
-                        await saveAsPNG(doc, pngToken);
-                        log(`[DEBUG] ✅ PNG saved successfully using file token: ${pngFile.nativePath}`);
-                    } else {
-                        log(`[DEBUG] No PNG file entry created, attempting direct path save to: ${pngPath}`);
-                        await saveAsPNG(doc, pngPath);
-                        log(`[DEBUG] ✅ PNG saved successfully using path: ${pngPath}`);
-                    }
-                } catch (pngSaveError) {
-                    log(`[DEBUG] ❌ PNG save failed: ${pngSaveError.message}`);
-                    log(`[DEBUG] Error details: ${JSON.stringify(pngSaveError)}`);
+                    log(`[DEBUG] Saving PSD file to: ${psdPath}`);
+                    psdSaveResult = await saveAsPSD(doc, psdPath);
+                    log(`[DEBUG] ✅ PSD save result: ${JSON.stringify(psdSaveResult)}`);
+                    psdSaved = true;
+                    filesSaved.psd = true;
+                } catch (psdError) {
+                    log(`[DEBUG] ❌ PSD save failed with error: ${psdError.message}`);
+                    log(`[DEBUG] Error details: ${JSON.stringify(psdError)}`);
                     
-                    // Try one more direct approach
-                    try {
-                        log(`[DEBUG] Attempting direct PNG save as last resort...`);
-                        const saveDesc = {
-                            _obj: "save",
-                            as: {
-                                _obj: "PNGFormat",
-                                PNG8: false
-                            },
-                            in: { _path: pngPath },
-                            copy: true,
-                            _options: { 
-                                dialogOptions: "dontDisplay"
+                    // Add to errors but continue
+                    errors.push({
+                        type: 'PSD_SAVE',
+                        error: psdError.message,
+                        path: psdPath
+                    });
+                }
+
+                // Verify files were created
+                try {
+                    log(`[DEBUG] Verifying saved files exist...`);
+                    const fs = require('uxp').storage.localFileSystem;
+                    
+                    // Verify PNG file
+                    if (pngSaved) {
+                        try {
+                            // Extract directory path and filename
+                            const pathParts = pngPath.split('/');
+                            const fileName = pathParts.pop();
+                            const dirPath = pathParts.join('/');
+                            
+                            // Get the directory
+                            const pngDir = await fs.getFolder(dirPath);
+                            const pngExists = await pngDir.getEntry(fileName);
+                            
+                            if (pngExists) {
+                                log(`[DEBUG] ✅ PNG file verified: ${pngExists.nativePath}`);
+                                log(`[DEBUG] PNG file size: ${await pngExists.size} bytes`);
+                                filesSaved.png = true;
+                            } else {
+                                log(`[DEBUG] ❌ PNG file not found after save`);
+                                filesSaved.png = false;
                             }
-                        };
-                        
-                        await batchPlay([saveDesc], { synchronousExecution: true });
-                        log(`[DEBUG] ✅ Direct PNG save succeeded`);
-                    } catch (directError) {
-                        log(`[DEBUG] ❌ Direct PNG save also failed: ${directError.message}`);
+                        } catch (pngVerifyError) {
+                            log(`[DEBUG] ❌ PNG file verification failed: ${pngVerifyError.message}`);
+                            filesSaved.png = false;
+                        }
                     }
-                }
-
-                // Save PSD - use file entry if available, otherwise use path
-                try {
-                    if (psdFile) {
-                        const fs = require('uxp').storage.localFileSystem;
-                        const psdToken = fs.createSessionToken(psdFile);
-                        log(`[DEBUG] Created session token for PSD file, now saving...`);
-                        await saveAsPSD(doc, psdToken);
-                        log(`[DEBUG] ✅ PSD saved successfully using file token: ${psdFile.nativePath}`);
-                    } else {
-                        log(`[DEBUG] No PSD file entry created, attempting direct path save to: ${psdPath}`);
-                        await saveAsPSD(doc, psdPath);
-                        log(`[DEBUG] ✅ PSD saved successfully using path: ${psdPath}`);
-                    }
-                } catch (psdSaveError) {
-                    log(`[DEBUG] ❌ PSD save failed: ${psdSaveError.message}`);
-                    log(`[DEBUG] Error details: ${JSON.stringify(psdSaveError)}`);
                     
-                    // Try one more direct approach
-                    try {
-                        log(`[DEBUG] Attempting direct PSD save as last resort...`);
-                        const saveDesc = {
-                            _obj: "save",
-                            as: {
-                                _obj: "photoshop35Format",
-                                maximizeCompatibility: true
-                            },
-                            in: { _path: psdPath },
-                            copy: true,
-                            _options: { 
-                                dialogOptions: "dontDisplay"
+                    // Verify PSD file
+                    if (psdSaved) {
+                        try {
+                            // Extract directory path and filename
+                            const pathParts = psdPath.split('/');
+                            const fileName = pathParts.pop();
+                            const dirPath = pathParts.join('/');
+                            
+                            // Get the directory
+                            const psdDir = await fs.getFolder(dirPath);
+                            const psdExists = await psdDir.getEntry(fileName);
+                            
+                            if (psdExists) {
+                                log(`[DEBUG] ✅ PSD file verified: ${psdExists.nativePath}`);
+                                log(`[DEBUG] PSD file size: ${await psdExists.size} bytes`);
+                                filesSaved.psd = true;
+                            } else {
+                                log(`[DEBUG] ❌ PSD file not found after save`);
+                                filesSaved.psd = false;
                             }
-                        };
-                        
-                        await batchPlay([saveDesc], { synchronousExecution: true });
-                        log(`[DEBUG] ✅ Direct PSD save succeeded`);
-                    } catch (directError) {
-                        log(`[DEBUG] ❌ Direct PSD save also failed: ${directError.message}`);
+                        } catch (psdVerifyError) {
+                            log(`[DEBUG] ❌ PSD file verification failed: ${psdVerifyError.message}`);
+                            filesSaved.psd = false;
+                        }
                     }
+                } catch (verifyError) {
+                    log(`[DEBUG] File verification error: ${verifyError.message}`);
                 }
 
-                // Check if files actually exist
-                try {
-                    const pngExists = await folders.pngFolder.getEntry(`${baseFileName}.png`);
-                    log(`[DEBUG] ✅ PNG file exists in output folder: ${pngExists.nativePath}`);
-                } catch (checkError) {
-                    log(`[DEBUG] ❌ PNG file does not exist in output folder: ${checkError.message}`);
-                }
-                
-                try {
-                    const psdExists = await folders.psdFolder.getEntry(`${baseFileName}.psd`);
-                    log(`[DEBUG] ✅ PSD file exists in output folder: ${psdExists.nativePath}`);
-                } catch (checkError) {
-                    log(`[DEBUG] ❌ PSD file does not exist in output folder: ${checkError.message}`);
+                // Log file save summary
+                if (pngSaved || psdSaved) {
+                    log(`[DEBUG] ✅ Row ${index} processing complete with files saved:`);
+                    if (pngSaved) log(`[DEBUG]   - PNG: ${pngPath}`);
+                    if (psdSaved) log(`[DEBUG]   - PSD: ${psdPath}`);
+                } else {
+                    log(`[DEBUG] ❌ Row ${index} processing complete but NO FILES SAVED`);
                 }
 
-                // Write success to MCP relay
-                await writeToMCPRelay({
-                    command: "sendLog",
-                    message: `Files saved successfully for ${baseFileName}`,
-                    data: {
-                        filename: baseFileName,
-                        png: pngFile ? pngFile.nativePath : pngPath,
-                        psd: psdFile ? psdFile.nativePath : psdPath,
+                // Write success to MCP relay for external monitoring
+                try {
+                    await writeToMCPRelay({
+                        status: 'success',
+                        files: {
+                            png: pngSaved ? pngPath : null,
+                            psd: psdSaved ? psdPath : null
+                        },
                         timestamp: new Date().toISOString()
-                    }
-                });
-
+                    });
+                } catch (mcpError) {
+                    log(`[DEBUG] MCP relay write failed: ${mcpError.message}`);
+                }
             } catch (saveError) {
-                log(`[DEBUG] ❌ Save operation failed: ${saveError.message}`);
+                log(`[DEBUG] Critical save error: ${saveError.message}`);
                 errors.push({
-                    type: 'SAVE_ERROR',
-                    error: saveError.message,
-                    code: saveError.code
+                    type: 'save',
+                    error: saveError.message
                 });
             }
         }
 
+        // Return processing results
         return {
             success: layerUpdates.length > 0,
-            processedLayers: layerUpdates.length,
-            failedLayers: errors.length,
-            errors,
-            textLayers: textLayers.length,
-            layerUpdates,
-            duration: Date.now() - processingStart
+            processed: layerUpdates.length,
+            errors: errors.length > 0 ? errors : null,
+            duration: Date.now() - processingStart,
+            filesSaved: filesSaved
         };
-
     } catch (error) {
-        console.error("[DEBUG] Row processing error:", {
-            rowIndex: index,
-            error: error.message,
-            code: error.code,
-            duration: Date.now() - processingStart
-        });
-
-        throw new PluginError(
-            'Row processing error',
-            'ROW_PROCESS_ERROR',
-            {
-                originalError: error,
-                rowIndex: index,
-                processedLayers: layerUpdates.length,
-                failedLayers: errors.length,
-                errors,
-                duration: Date.now() - processingStart
-            }
-        );
+        log(`[DEBUG] Row processing error: ${error.message}`);
+        throw error;
     }
 }
 
@@ -1725,13 +1914,58 @@ async function processImageRow(row, index, total) {
 // Add a global processing control variable
 let isProcessingStopped = false;
 
-// Update the processTextReplacement function to check for stop flag
+// Add a global stop processing flag
+let stopProcessingRequested = false;
+
+// Function to check if processing should stop
+function shouldStopProcessing() {
+    return stopProcessingRequested;
+}
+
+// Function to request stopping the processing
+function requestStopProcessing() {
+    stopProcessingRequested = true;
+    log("[DEBUG] Stop processing requested by user");
+    
+    // Update UI to show stopping
+    const statusElement = document.getElementById('textStatus');
+    if (statusElement) {
+        statusElement.textContent = 'Stopping...';
+        statusElement.style.color = 'orange';
+    }
+    
+    // Disable stop button
+    const stopButton = document.getElementById('stopProcessingBtn');
+    if (stopButton) {
+        stopButton.disabled = true;
+        stopButton.textContent = 'Stopping...';
+    }
+    
+    return true;
+}
+
+// Function to reset stop processing flag
+function resetStopProcessing() {
+    stopProcessingRequested = false;
+    
+    // Update UI elements
+    const stopButton = document.getElementById('stopProcessingBtn');
+    if (stopButton) {
+        stopButton.disabled = false;
+        stopButton.textContent = 'Stop Processing';
+        stopButton.style.display = 'none';
+    }
+    
+    return true;
+}
+
+// Update the processTextReplacement function to check for stop requests
 async function processTextReplacement() {
     const textStatus = document.getElementById('textStatus');
     const processType = document.querySelector('input[name="processType"]:checked')?.value;
     
     // Reset the stop flag when starting a new process
-    isProcessingStopped = false;
+    resetStopProcessing();
     
     if (!processType) {
         log('[Cursor OK] Process type not selected');
@@ -1752,7 +1986,7 @@ async function processTextReplacement() {
         if (!doc) {
             throw new PluginError('No active document found', 'NO_DOCUMENT');
         }
-
+        
         // Initialize document once at the start
         textStatus.textContent = 'Initializing document...';
         try {
@@ -1768,10 +2002,16 @@ async function processTextReplacement() {
         textReplaceState.status.currentOperation = 'text_replacement';
         textStatus.textContent = 'Setting up output folders...';
         
+        // Show stop button
+        const stopButton = document.getElementById('stopProcessingBtn');
+        if (stopButton) {
+            stopButton.style.display = 'block';
+        }
+        
         // Setup output folders using text-specific function
         let folders;
         try {
-            folders = await setupTextOutputFolders(textReplaceState.data.outputFolder);
+            folders = await setupTextOutputFolders();
         } catch (folderError) {
             console.error("[DEBUG] Folder setup failed:", folderError);
             throw new PluginError(
@@ -1790,13 +2030,7 @@ async function processTextReplacement() {
             if (processButton) {
                 processButton.textContent = 'Stop Processing';
                 processButton.classList.add('stop-button');
-                // Change the button to a stop button
-                processButton.onclick = () => {
-                    isProcessingStopped = true;
-                    textStatus.textContent = 'Stopping processing...';
-                    log('[DEBUG] Processing stop requested by user');
-                    processButton.disabled = true;
-                };
+                processButton.disabled = true; // Disable the main button while stop button is active
             }
             
             // Process single row or all rows
@@ -1805,6 +2039,10 @@ async function processTextReplacement() {
                 if (currentRowIndex < textReplaceState.data.csvData.length) {
                     const row = textReplaceState.data.csvData[currentRowIndex];
                     textStatus.textContent = `Processing row ${currentRowIndex + 1}/${textReplaceState.data.csvData.length}...`;
+                    const progressElement = document.getElementById('processingProgress');
+                    if (progressElement) {
+                        progressElement.textContent = `Processing row ${currentRowIndex + 1} of ${textReplaceState.data.csvData.length}`;
+                    }
                     await processTextRow(row, currentRowIndex, textReplaceState.data.csvData.length, folders);
                     textStatus.textContent = `Processed row ${currentRowIndex + 1}/${textReplaceState.data.csvData.length}`;
                 } else {
@@ -1815,7 +2053,7 @@ async function processTextReplacement() {
                 const startIndex = textReplaceState.status.performance.processedRows || 0;
                 for (let i = startIndex; i < textReplaceState.data.csvData.length; i++) {
                     // Check if processing should stop
-                    if (isProcessingStopped) {
+                    if (shouldStopProcessing()) {
                         textStatus.textContent = 'Processing stopped by user';
                         log('[DEBUG] Processing stopped by user request');
                         break;
@@ -1823,11 +2061,18 @@ async function processTextReplacement() {
                     
                     const row = textReplaceState.data.csvData[i];
                     textStatus.textContent = `Processing row ${i + 1}/${textReplaceState.data.csvData.length}...`;
+                    
+                    // Update progress element
+                    const progressElement = document.getElementById('processingProgress');
+                    if (progressElement) {
+                        progressElement.textContent = `Processing row ${i + 1} of ${textReplaceState.data.csvData.length}`;
+                    }
+                    
                     await processTextRow(row, i, textReplaceState.data.csvData.length, folders);
                     textReplaceState.status.performance.processedRows = i + 1;
                 }
                 
-                if (!isProcessingStopped) {
+                if (!shouldStopProcessing()) {
                     textStatus.textContent = 'All rows processed';
                 }
             }
@@ -1837,9 +2082,15 @@ async function processTextReplacement() {
                 processButton.textContent = 'Process CSV';
                 processButton.classList.remove('stop-button');
                 processButton.disabled = false;
-                // Restore original click handler
-                processButton.onclick = processTextReplacement;
             }
+            
+            // Hide stop button
+            if (stopButton) {
+                stopButton.style.display = 'none';
+            }
+            
+            // Reset stop flag
+            resetStopProcessing();
             
             const duration = Date.now() - startTime;
             
@@ -1861,8 +2112,9 @@ async function processTextReplacement() {
 
             log('[Cursor OK] Text replacement completed');
             log(`[Cursor OK] Files saved to:`);
-            log(`  PNG folder: ${folders.pngFolder.nativePath}`);
-            log(`  PSD folder: ${folders.psdFolder.nativePath}`);
+            log(`  PNG folder: ${folders.pngNativePath}`);
+            log(`  PSD folder: ${folders.psdNativePath}`);
+            
         } catch (error) {
             console.error("[DEBUG] Text replacement error:", error);
             throw error;
@@ -1877,9 +2129,16 @@ async function processTextReplacement() {
             processButton.textContent = 'Process CSV';
             processButton.classList.remove('stop-button');
             processButton.disabled = false;
-            // Restore original click handler
-            processButton.onclick = processTextReplacement;
         }
+        
+        // Hide stop button
+        const stopButton = document.getElementById('stopProcessingBtn');
+        if (stopButton) {
+            stopButton.style.display = 'none';
+        }
+        
+        // Reset stop flag
+        resetStopProcessing();
         
         textReplaceState.status.isProcessing = false;
     }
@@ -2050,7 +2309,7 @@ document.getElementById('selectOutputFolder').addEventListener('click', async ()
             console.log("[DEBUG] Setting up output folders in:", textReplaceState.data.outputFolder.nativePath);
             
             // Immediately try to setup the folders
-            const folders = await setupTextOutputFolders(textReplaceState.data.outputFolder);
+            const folders = await setupTextOutputFolders();
             
             textReplaceState.status.steps.outputFolderSelected = true;
             log(`[Cursor OK] Text output folders created:`);
@@ -2202,3 +2461,177 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
     document.head.appendChild(style);
 });
+
+// Add event listener for stop button
+document.addEventListener('DOMContentLoaded', function() {
+    // Add existing event listeners
+    
+    // Add stop button event listener
+    const stopButton = document.getElementById('stopProcessingBtn');
+    if (stopButton) {
+        stopButton.addEventListener('click', requestStopProcessing);
+    }
+    
+    // Other existing event listeners
+});
+
+async function processCSV(csvData) {
+    // Reset stop processing flag at the start of each CSV processing
+    stopProcessingRequested = false;
+    
+    try {
+        log(`[DEBUG] Starting CSV processing with ${csvData.length} rows`);
+        
+        // Update UI to show processing started
+        const statusElement = document.getElementById('textStatus');
+        if (statusElement) {
+            statusElement.textContent = 'Processing...';
+            statusElement.style.color = '#4CAF50';
+        }
+        
+        // Show stop button during processing
+        const stopButton = document.getElementById('stopProcessingBtn');
+        if (stopButton) {
+            stopButton.style.display = 'block';
+            stopButton.disabled = false;
+            stopButton.textContent = 'Stop Processing';
+        }
+        
+        // Setup output folders
+        const folders = await setupTextOutputFolders();
+        log(`[DEBUG] Output folders setup complete`);
+        
+        // Process each row
+        const results = [];
+        let processedCount = 0;
+        let errorCount = 0;
+        let savedFileCount = 0;
+        
+        for (let i = 0; i < csvData.length; i++) {
+            // Check if processing should stop
+            if (shouldStopProcessing()) {
+                log(`[DEBUG] Processing stopped by user after ${processedCount} rows`);
+                break;
+            }
+            
+            const row = csvData[i];
+            
+            try {
+                // Update UI with current progress
+                if (statusElement) {
+                    statusElement.textContent = `Processing row ${i + 1} of ${csvData.length}...`;
+                }
+                
+                log(`[DEBUG] Processing row ${i + 1} of ${csvData.length}`);
+                const result = await processTextRow(row, i + 1, csvData.length, folders);
+                
+                // Track successful saves
+                if (result.success) {
+                    processedCount++;
+                    
+                    // Check if files were saved
+                    const filesSaved = result.filesSaved || {};
+                    if (filesSaved.png || filesSaved.psd) {
+                        savedFileCount += (filesSaved.png ? 1 : 0) + (filesSaved.psd ? 1 : 0);
+                    }
+                }
+                
+                // Track errors
+                if (result.errors && result.errors.length > 0) {
+                    errorCount += result.errors.length;
+                }
+                
+                results.push(result);
+                
+                // Pause briefly to allow UI updates and prevent freezing
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+            } catch (rowError) {
+                log(`[DEBUG] Error processing row ${i + 1}: ${rowError.message}`);
+                errorCount++;
+                results.push({
+                    success: false,
+                    error: rowError.message,
+                    rowIndex: i + 1
+                });
+                
+                // Continue with next row instead of stopping the whole process
+                continue;
+            }
+        }
+        
+        // Hide stop button after processing
+        if (stopButton) {
+            stopButton.style.display = 'none';
+        }
+        
+        // Update UI with final status
+        if (statusElement) {
+            if (stopProcessingRequested) {
+                statusElement.textContent = `Stopped: ${processedCount} rows processed, ${savedFileCount} files saved, ${errorCount} errors`;
+                statusElement.style.color = 'orange';
+            } else if (errorCount > 0) {
+                statusElement.textContent = `Completed with issues: ${processedCount} rows processed, ${savedFileCount} files saved, ${errorCount} errors`;
+                statusElement.style.color = 'orange';
+            } else {
+                statusElement.textContent = `Completed: ${processedCount} rows processed, ${savedFileCount} files saved`;
+                statusElement.style.color = '#4CAF50';
+            }
+        }
+        
+        // Log completion statistics
+        log(`[DEBUG] CSV processing ${stopProcessingRequested ? 'stopped' : 'completed'}:`);
+        log(`[DEBUG] - Rows processed: ${processedCount} of ${csvData.length}`);
+        log(`[DEBUG] - Files saved: ${savedFileCount}`);
+        log(`[DEBUG] - Errors: ${errorCount}`);
+        
+        // Show output folder paths
+        log(`[DEBUG] Files saved to:`);
+        log(`[DEBUG] - PNG: ${folders.pngNativePath}`);
+        log(`[DEBUG] - PSD: ${folders.psdNativePath}`);
+        
+        // Write final status to MCP relay
+        try {
+            await writeToMCPRelay({
+                status: stopProcessingRequested ? 'stopped' : 'completed',
+                statistics: {
+                    totalRows: csvData.length,
+                    processedRows: processedCount,
+                    savedFiles: savedFileCount,
+                    errors: errorCount
+                },
+                timestamp: new Date().toISOString()
+            });
+        } catch (mcpError) {
+            log(`[DEBUG] Failed to write final status to MCP relay: ${mcpError.message}`);
+        }
+        
+        return {
+            success: processedCount > 0,
+            processed: processedCount,
+            total: csvData.length,
+            errors: errorCount,
+            stopped: stopProcessingRequested,
+            savedFiles: savedFileCount,
+            results
+        };
+    } catch (error) {
+        log(`[DEBUG] CSV processing failed with critical error: ${error.message}`);
+        log(`[DEBUG] Error stack: ${error.stack}`);
+        
+        // Update UI to show error
+        const statusElement = document.getElementById('textStatus');
+        if (statusElement) {
+            statusElement.textContent = `Error: ${error.message}`;
+            statusElement.style.color = 'red';
+        }
+        
+        // Hide stop button
+        const stopButton = document.getElementById('stopProcessingBtn');
+        if (stopButton) {
+            stopButton.style.display = 'none';
+        }
+        
+        throw error;
+    }
+}
