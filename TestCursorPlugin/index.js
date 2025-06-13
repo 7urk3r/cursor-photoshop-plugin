@@ -744,75 +744,94 @@ async function setupTextOutputFolders(outputFolder) {
         console.log("[DEBUG] Checking output folders in:", outputFolder.nativePath);
         const folders = {};
         
+        // Store the base output folder
+        folders.baseFolder = outputFolder;
+        
         // Check PNG folder, create if not exists
         try {
             console.log("[DEBUG] Checking Text_PNG folder...");
-            folders.pngFolder = await outputFolder.getEntry('Text_PNG');
-            if (!folders.pngFolder.isFolder) {
-                throw new Error('Text_PNG exists but is not a folder');
-            }
-            console.log("[DEBUG] Found existing Text_PNG folder:", folders.pngFolder.nativePath);
-        } catch (error) {
-            console.log("[DEBUG] Text_PNG folder not found, creating new one...");
             try {
-                folders.pngFolder = await outputFolder.createEntry('Text_PNG', { type: 'folder' });
-                if (!folders.pngFolder || !folders.pngFolder.isFolder) {
-                    throw new PluginError('Failed to create PNG folder', 'FOLDER_CREATE_ERROR');
+                folders.pngFolder = await outputFolder.getEntry('Text_PNG');
+                if (!folders.pngFolder.isFolder) {
+                    throw new Error('Text_PNG exists but is not a folder');
                 }
+                console.log("[DEBUG] Found existing Text_PNG folder:", folders.pngFolder.nativePath);
+            } catch (notFoundError) {
+                // If the folder doesn't exist, create it
+                console.log("[DEBUG] Text_PNG folder not found, creating new one...");
+                folders.pngFolder = await outputFolder.createEntry('Text_PNG', { type: 'folder' });
                 console.log("[DEBUG] Created new Text_PNG folder:", folders.pngFolder.nativePath);
-            } catch (createError) {
-                throw new PluginError(
-                    'Failed to create Text_PNG folder',
-                    'FOLDER_CREATE_ERROR',
-                    { path: 'Text_PNG', error: createError }
-                );
             }
+            
+            // Verify the folder was created
+            if (!folders.pngFolder || !folders.pngFolder.isFolder) {
+                throw new PluginError('Failed to create PNG folder', 'FOLDER_CREATE_ERROR');
+            }
+        } catch (error) {
+            console.error("[DEBUG] Error with PNG folder:", error);
+            throw new PluginError(
+                'Failed to create Text_PNG folder',
+                'FOLDER_CREATE_ERROR',
+                { path: 'Text_PNG', error }
+            );
         }
         
         // Check PSD folder, create if not exists
         try {
             console.log("[DEBUG] Checking Text_PSD folder...");
-            folders.psdFolder = await outputFolder.getEntry('Text_PSD');
-            if (!folders.psdFolder.isFolder) {
-                throw new Error('Text_PSD exists but is not a folder');
-            }
-            console.log("[DEBUG] Found existing Text_PSD folder:", folders.psdFolder.nativePath);
-        } catch (error) {
-            console.log("[DEBUG] Text_PSD folder not found, creating new one...");
             try {
-                folders.psdFolder = await outputFolder.createEntry('Text_PSD', { type: 'folder' });
-                if (!folders.psdFolder || !folders.psdFolder.isFolder) {
-                    throw new PluginError('Failed to create PSD folder', 'FOLDER_CREATE_ERROR');
+                folders.psdFolder = await outputFolder.getEntry('Text_PSD');
+                if (!folders.psdFolder.isFolder) {
+                    throw new Error('Text_PSD exists but is not a folder');
                 }
+                console.log("[DEBUG] Found existing Text_PSD folder:", folders.psdFolder.nativePath);
+            } catch (notFoundError) {
+                // If the folder doesn't exist, create it
+                console.log("[DEBUG] Text_PSD folder not found, creating new one...");
+                folders.psdFolder = await outputFolder.createEntry('Text_PSD', { type: 'folder' });
                 console.log("[DEBUG] Created new Text_PSD folder:", folders.psdFolder.nativePath);
-            } catch (createError) {
-                throw new PluginError(
-                    'Failed to create Text_PSD folder',
-                    'FOLDER_CREATE_ERROR',
-                    { path: 'Text_PSD', error: createError }
-                );
             }
+            
+            // Verify the folder was created
+            if (!folders.psdFolder || !folders.psdFolder.isFolder) {
+                throw new PluginError('Failed to create PSD folder', 'FOLDER_CREATE_ERROR');
+            }
+        } catch (error) {
+            console.error("[DEBUG] Error with PSD folder:", error);
+            throw new PluginError(
+                'Failed to create Text_PSD folder',
+                'FOLDER_CREATE_ERROR',
+                { path: 'Text_PSD', error }
+            );
         }
 
         // Verify both folders are accessible
-        const pngExists = await folders.pngFolder.isEntry;
-        const psdExists = await folders.psdFolder.isEntry;
-        
-        if (!pngExists || !psdExists) {
+        try {
+            const pngExists = await folders.pngFolder.isEntry;
+            const psdExists = await folders.psdFolder.isEntry;
+            
+            if (!pngExists || !psdExists) {
+                throw new PluginError(
+                    'Could not verify folder access', 
+                    'FOLDER_ACCESS_ERROR',
+                    {
+                        pngExists,
+                        psdExists,
+                        pngPath: folders.pngFolder?.nativePath,
+                        psdPath: folders.psdFolder?.nativePath
+                    }
+                );
+            }
+        } catch (verifyError) {
+            console.error("[DEBUG] Folder verification failed:", verifyError);
             throw new PluginError(
-                'Could not verify folder access', 
-                'FOLDER_ACCESS_ERROR',
-                {
-                    pngExists,
-                    psdExists,
-                    pngPath: folders.pngFolder?.nativePath,
-                    psdPath: folders.psdFolder?.nativePath
-                }
+                'Failed to verify folder access', 
+                'FOLDER_VERIFY_ERROR',
+                { error: verifyError }
             );
         }
 
         // Ensure native paths are properly formatted for M1 Macs
-        // This helps with path compatibility issues on M1 architecture
         folders.pngNativePath = folders.pngFolder.nativePath.replace(/\\/g, '/');
         folders.psdNativePath = folders.psdFolder.nativePath.replace(/\\/g, '/');
 
@@ -1042,12 +1061,48 @@ async function loadImageCSV(file) {
     }
 }
 
-// Updated PNG save function with proper API v2 format
+// Updated PNG save function with proper API v2 format based on official documentation
 async function saveAsPNG(doc, outputPath) {
     try {
         log(`[DEBUG] Starting PNG save to: ${outputPath}`);
         
-        // Create the save descriptor with updated format for PS 2025 on M1
+        // First ensure we have a valid file token
+        const fs = require('uxp').storage.localFileSystem;
+        const tempFolder = await fs.getTemporaryFolder();
+        
+        // Parse the output path to get just the filename
+        const pathParts = outputPath.split('/');
+        const fileName = pathParts[pathParts.length - 1];
+        
+        // Create the file entry in the output directory
+        const outputDir = pathParts.slice(0, -1).join('/');
+        log(`[DEBUG] Attempting to access output directory: ${outputDir}`);
+        
+        let outputFile;
+        try {
+            // Try to get the directory using the path
+            const outputDirEntry = await fs.getEntryWithUrl(`file:${outputDir}`);
+            if (!outputDirEntry || !outputDirEntry.isFolder) {
+                throw new Error('Invalid output directory');
+            }
+            
+            // Create the file in the output directory
+            outputFile = await outputDirEntry.createFile(fileName, { overwrite: true });
+            log(`[DEBUG] Created file entry at: ${outputFile.nativePath}`);
+        } catch (dirError) {
+            log(`[DEBUG] Error accessing output directory: ${dirError.message}`);
+            log(`[DEBUG] Attempting fallback to temporary folder...`);
+            
+            // Fallback to temp folder
+            outputFile = await tempFolder.createFile(fileName, { overwrite: true });
+            log(`[DEBUG] Created temporary file at: ${outputFile.nativePath}`);
+        }
+        
+        // Create a session token for the file
+        const sessionToken = fs.createSessionToken(outputFile);
+        log(`[DEBUG] Created session token for file`);
+        
+        // Use the proper save method from the documentation
         const saveDesc = {
             _obj: "exportDocument",
             documentID: doc._id,
@@ -1058,18 +1113,13 @@ async function saveAsPNG(doc, outputPath) {
                 interlaced: false,
                 quality: 100
             },
-            filePath: { _path: outputPath },
-            options: {
-                _obj: "PNGFormatOptions",
-                PNG8: false,
-                compression: 6
-            },
+            _path: sessionToken,
             _options: { 
                 dialogOptions: "dontDisplay"
             }
         };
 
-        log("[DEBUG] Executing PNG save command...");
+        log("[DEBUG] Executing PNG save command with session token...");
         
         const result = await batchPlay(
             [saveDesc],
@@ -1079,7 +1129,7 @@ async function saveAsPNG(doc, outputPath) {
             }
         );
 
-        log(`[DEBUG] PNG Save completed successfully: ${outputPath}`);
+        log(`[DEBUG] PNG Save completed successfully: ${outputFile.nativePath}`);
         return result;
 
     } catch (error) {
@@ -1089,7 +1139,8 @@ async function saveAsPNG(doc, outputPath) {
         try {
             log(`[DEBUG] Attempting fallback PNG save method...`);
             
-            const fallbackSaveDesc = {
+            // Get the proper constants
+            const saveOptions = {
                 _obj: "save",
                 as: {
                     _obj: "PNGFormat",
@@ -1098,13 +1149,17 @@ async function saveAsPNG(doc, outputPath) {
                 },
                 in: { _path: outputPath },
                 copy: true,
+                saveStages: {
+                    _enum: "saveStagesType",
+                    _value: "saveSucceeded"
+                },
                 _options: { 
                     dialogOptions: "dontDisplay"
                 }
             };
             
             const fallbackResult = await batchPlay(
-                [fallbackSaveDesc],
+                [saveOptions],
                 {
                     synchronousExecution: true,
                     modalBehavior: "none"
@@ -1116,11 +1171,54 @@ async function saveAsPNG(doc, outputPath) {
             
         } catch (fallbackError) {
             log(`[DEBUG] Fallback PNG Save also failed: ${fallbackError.message}`);
-            throw new PluginError(
-                'Failed to save PNG (both primary and fallback methods failed)',
-                'PNG_SAVE_ERROR',
-                { originalError: error, fallbackError, outputPath }
-            );
+            
+            // Try one more approach based on the Adobe forums
+            try {
+                log(`[DEBUG] Attempting last-resort save method using file token...`);
+                
+                const fs = require('uxp').storage.localFileSystem;
+                const tempFolder = await fs.getTemporaryFolder();
+                const fileName = outputPath.split('/').pop();
+                const tempFile = await tempFolder.createFile(fileName, { overwrite: true });
+                const saveToken = fs.createSessionToken(tempFile);
+                
+                const lastResortSaveDesc = {
+                    _obj: "save",
+                    as: {
+                        _obj: "PNGFormat",
+                        PNG8: false
+                    },
+                    in: { _path: saveToken },
+                    copy: true,
+                    _options: { 
+                        dialogOptions: "dontDisplay"
+                    }
+                };
+                
+                const lastResult = await batchPlay(
+                    [lastResortSaveDesc],
+                    {
+                        synchronousExecution: true,
+                        modalBehavior: "none"
+                    }
+                );
+                
+                log(`[DEBUG] Last-resort PNG Save completed to temp: ${tempFile.nativePath}`);
+                return lastResult;
+                
+            } catch (lastError) {
+                log(`[DEBUG] All PNG save methods failed`);
+                throw new PluginError(
+                    'Failed to save PNG (all methods failed)',
+                    'PNG_SAVE_ERROR',
+                    { 
+                        originalError: error, 
+                        fallbackError, 
+                        lastError,
+                        outputPath 
+                    }
+                );
+            }
         }
     }
 }
@@ -1130,7 +1228,48 @@ async function saveAsPSD(doc, outputPath) {
     try {
         log(`[DEBUG] Starting PSD save to: ${outputPath}`);
         
-        // Create the save descriptor
+        // Check if outputPath is already a session token
+        let sessionToken = outputPath;
+        
+        // If it's a file path, create a file entry and get a session token
+        if (typeof outputPath === 'string' && outputPath.includes('/')) {
+            const fs = require('uxp').storage.localFileSystem;
+            const tempFolder = await fs.getTemporaryFolder();
+            
+            // Parse the output path to get just the filename
+            const pathParts = outputPath.split('/');
+            const fileName = pathParts[pathParts.length - 1];
+            
+            // Create the file entry in the output directory
+            const outputDir = pathParts.slice(0, -1).join('/');
+            log(`[DEBUG] Attempting to access output directory for PSD: ${outputDir}`);
+            
+            let outputFile;
+            try {
+                // Try to get the directory using the path
+                const outputDirEntry = await fs.getEntryWithUrl(`file:${outputDir}`);
+                if (!outputDirEntry || !outputDirEntry.isFolder) {
+                    throw new Error('Invalid output directory');
+                }
+                
+                // Create the file in the output directory
+                outputFile = await outputDirEntry.createFile(fileName, { overwrite: true });
+                log(`[DEBUG] Created PSD file entry at: ${outputFile.nativePath}`);
+            } catch (dirError) {
+                log(`[DEBUG] Error accessing output directory for PSD: ${dirError.message}`);
+                log(`[DEBUG] Attempting fallback to temporary folder...`);
+                
+                // Fallback to temp folder
+                outputFile = await tempFolder.createFile(fileName, { overwrite: true });
+                log(`[DEBUG] Created temporary PSD file at: ${outputFile.nativePath}`);
+            }
+            
+            // Create a session token for the file
+            sessionToken = fs.createSessionToken(outputFile);
+            log(`[DEBUG] Created session token for PSD file`);
+        }
+        
+        // Create the save descriptor with proper format
         const saveDesc = {
             _obj: "save",
             as: {
@@ -1138,14 +1277,9 @@ async function saveAsPSD(doc, outputPath) {
                 alphaChannels: true,
                 embedColorProfile: true,
                 layers: true,
-                maximizeCompatibility: true,
-                saveStages: {
-                    _enum: "saveStagesType",
-                    _value: "saveBegin"
-                }
+                maximizeCompatibility: true
             },
-            in: { _path: outputPath },
-            documentID: doc._id,
+            in: { _path: sessionToken },
             copy: true,
             lowerCase: true,
             _options: { 
@@ -1163,16 +1297,61 @@ async function saveAsPSD(doc, outputPath) {
             }
         );
 
-        log(`[DEBUG] PSD Save completed successfully: ${outputPath}`);
+        log(`[DEBUG] PSD Save completed successfully`);
         return result;
 
     } catch (error) {
         log(`[DEBUG] PSD Save Failed: ${error.message}`);
-        throw new PluginError(
-            'Failed to save PSD',
-            'PSD_SAVE_ERROR',
-            { originalError: error, outputPath }
-        );
+        
+        // Try fallback method
+        try {
+            log(`[DEBUG] Attempting fallback PSD save method...`);
+            
+            const fs = require('uxp').storage.localFileSystem;
+            const tempFolder = await fs.getTemporaryFolder();
+            const fileName = typeof outputPath === 'string' ? 
+                outputPath.split('/').pop() : 
+                `document_${Date.now()}.psd`;
+                
+            const tempFile = await tempFolder.createFile(fileName, { overwrite: true });
+            const saveToken = fs.createSessionToken(tempFile);
+            
+            const fallbackSaveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "photoshop35Format",
+                    maximizeCompatibility: true
+                },
+                in: { _path: saveToken },
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+            
+            const fallbackResult = await batchPlay(
+                [fallbackSaveDesc],
+                {
+                    synchronousExecution: true,
+                    modalBehavior: "none"
+                }
+            );
+            
+            log(`[DEBUG] Fallback PSD Save completed to temp: ${tempFile.nativePath}`);
+            return fallbackResult;
+            
+        } catch (fallbackError) {
+            log(`[DEBUG] All PSD save methods failed`);
+            throw new PluginError(
+                'Failed to save PSD (all methods failed)',
+                'PSD_SAVE_ERROR',
+                { 
+                    originalError: error, 
+                    fallbackError,
+                    outputPath 
+                }
+            );
+        }
     }
 }
 
@@ -1398,13 +1577,42 @@ async function processTextRow(row, index, total, folders) {
                     timestamp: new Date().toISOString()
                 });
 
-                // Save PNG
-                await saveAsPNG(doc, pngPath);
-                log(`[DEBUG] ✅ PNG saved successfully: ${pngPath}`);
+                // Create file entries first
+                let pngFile, psdFile;
+                try {
+                    // Create PNG file entry
+                    pngFile = await folders.pngFolder.createFile(`${baseFileName}.png`, { overwrite: true });
+                    log(`[DEBUG] Created PNG file entry: ${pngFile.nativePath}`);
+                    
+                    // Create PSD file entry
+                    psdFile = await folders.psdFolder.createFile(`${baseFileName}.psd`, { overwrite: true });
+                    log(`[DEBUG] Created PSD file entry: ${psdFile.nativePath}`);
+                } catch (fileCreateError) {
+                    log(`[DEBUG] Error creating file entries: ${fileCreateError.message}`);
+                    // Continue with path-based approach as fallback
+                }
 
-                // Save PSD
-                await saveAsPSD(doc, psdPath);
-                log(`[DEBUG] ✅ PSD saved successfully: ${psdPath}`);
+                // Save PNG - use file entry if available, otherwise use path
+                if (pngFile) {
+                    const fs = require('uxp').storage.localFileSystem;
+                    const pngToken = fs.createSessionToken(pngFile);
+                    await saveAsPNG(doc, pngToken);
+                    log(`[DEBUG] ✅ PNG saved successfully using file token: ${pngFile.nativePath}`);
+                } else {
+                    await saveAsPNG(doc, pngPath);
+                    log(`[DEBUG] ✅ PNG saved successfully using path: ${pngPath}`);
+                }
+
+                // Save PSD - use file entry if available, otherwise use path
+                if (psdFile) {
+                    const fs = require('uxp').storage.localFileSystem;
+                    const psdToken = fs.createSessionToken(psdFile);
+                    await saveAsPSD(doc, psdToken);
+                    log(`[DEBUG] ✅ PSD saved successfully using file token: ${psdFile.nativePath}`);
+                } else {
+                    await saveAsPSD(doc, psdPath);
+                    log(`[DEBUG] ✅ PSD saved successfully using path: ${psdPath}`);
+                }
 
                 // Write success to MCP relay
                 await writeToMCPRelay({
@@ -1412,8 +1620,8 @@ async function processTextRow(row, index, total, folders) {
                     message: `Files saved successfully for ${baseFileName}`,
                     data: {
                         filename: baseFileName,
-                        png: pngPath,
-                        psd: psdPath,
+                        png: pngFile ? pngFile.nativePath : pngPath,
+                        psd: psdFile ? psdFile.nativePath : psdPath,
                         timestamp: new Date().toISOString()
                     }
                 });
