@@ -24,3 +24,15 @@ __pycache__/
 # VSCode / Editor settings
 .vscode/
 .idea/
+
+# Ignore all hidden system swap files
+.*.swp
+*.swo
+
+# Ignore backup files
+*~
+
+# Ignore build outputs (if ever created)
+build/
+dist/
+output/
