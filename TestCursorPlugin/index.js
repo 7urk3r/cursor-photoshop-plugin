@@ -1061,65 +1061,30 @@ async function loadImageCSV(file) {
     }
 }
 
-// Updated PNG save function with proper API v2 format based on official documentation
+// Updated PNG save function with proper API v2 format
 async function saveAsPNG(doc, outputPath) {
     try {
         log(`[DEBUG] Starting PNG save to: ${outputPath}`);
         
-        // First ensure we have a valid file token
-        const fs = require('uxp').storage.localFileSystem;
-        const tempFolder = await fs.getTemporaryFolder();
+        // Determine if we're dealing with a path or a token
+        const isPath = typeof outputPath === 'string' && outputPath.includes('/');
         
-        // Parse the output path to get just the filename
-        const pathParts = outputPath.split('/');
-        const fileName = pathParts[pathParts.length - 1];
-        
-        // Create the file entry in the output directory
-        const outputDir = pathParts.slice(0, -1).join('/');
-        log(`[DEBUG] Attempting to access output directory: ${outputDir}`);
-        
-        let outputFile;
-        try {
-            // Try to get the directory using the path
-            const outputDirEntry = await fs.getEntryWithUrl(`file:${outputDir}`);
-            if (!outputDirEntry || !outputDirEntry.isFolder) {
-                throw new Error('Invalid output directory');
-            }
-            
-            // Create the file in the output directory
-            outputFile = await outputDirEntry.createFile(fileName, { overwrite: true });
-            log(`[DEBUG] Created file entry at: ${outputFile.nativePath}`);
-        } catch (dirError) {
-            log(`[DEBUG] Error accessing output directory: ${dirError.message}`);
-            log(`[DEBUG] Attempting fallback to temporary folder...`);
-            
-            // Fallback to temp folder
-            outputFile = await tempFolder.createFile(fileName, { overwrite: true });
-            log(`[DEBUG] Created temporary file at: ${outputFile.nativePath}`);
-        }
-        
-        // Create a session token for the file
-        const sessionToken = fs.createSessionToken(outputFile);
-        log(`[DEBUG] Created session token for file`);
-        
-        // Use the proper save method from the documentation
+        // For M1 Mac compatibility, use the simplest possible approach
         const saveDesc = {
-            _obj: "exportDocument",
-            documentID: doc._id,
-            format: {
-                _obj: "PNG",
+            _obj: "save",
+            as: {
+                _obj: "PNGFormat",
                 PNG8: false,
-                transparency: true,
-                interlaced: false,
-                quality: 100
+                transparency: true
             },
-            _path: sessionToken,
+            in: { _path: outputPath },
+            copy: true,
             _options: { 
                 dialogOptions: "dontDisplay"
             }
         };
 
-        log("[DEBUG] Executing PNG save command with session token...");
+        log(`[DEBUG] Executing PNG save command with ${isPath ? 'path' : 'token'}...`);
         
         const result = await batchPlay(
             [saveDesc],
@@ -1129,92 +1094,82 @@ async function saveAsPNG(doc, outputPath) {
             }
         );
 
-        log(`[DEBUG] PNG Save completed successfully: ${outputFile.nativePath}`);
+        log(`[DEBUG] PNG Save completed successfully`);
         return result;
 
     } catch (error) {
         log(`[DEBUG] PNG Save Failed: ${error.message}`);
         
-        // Fallback method for PS 2025
+        // Try with exportDocument instead
         try {
-            log(`[DEBUG] Attempting fallback PNG save method...`);
+            log(`[DEBUG] Attempting exportDocument method...`);
             
-            // Get the proper constants
-            const saveOptions = {
-                _obj: "save",
-                as: {
-                    _obj: "PNGFormat",
+            const exportDesc = {
+                _obj: "exportDocument",
+                documentID: doc._id,
+                format: {
+                    _obj: "PNG",
                     PNG8: false,
-                    transparency: true
+                    transparency: true,
+                    interlaced: false,
+                    quality: 100
                 },
-                in: { _path: outputPath },
-                copy: true,
-                saveStages: {
-                    _enum: "saveStagesType",
-                    _value: "saveSucceeded"
-                },
+                _path: outputPath,
                 _options: { 
                     dialogOptions: "dontDisplay"
                 }
             };
             
-            const fallbackResult = await batchPlay(
-                [saveOptions],
+            const exportResult = await batchPlay(
+                [exportDesc],
                 {
                     synchronousExecution: true,
                     modalBehavior: "none"
                 }
             );
             
-            log(`[DEBUG] Fallback PNG Save completed successfully: ${outputPath}`);
-            return fallbackResult;
+            log(`[DEBUG] Export PNG Save completed successfully`);
+            return exportResult;
             
-        } catch (fallbackError) {
-            log(`[DEBUG] Fallback PNG Save also failed: ${fallbackError.message}`);
+        } catch (exportError) {
+            log(`[DEBUG] Export PNG Save also failed: ${exportError.message}`);
             
-            // Try one more approach based on the Adobe forums
+            // Try one more approach - the most basic one
             try {
-                log(`[DEBUG] Attempting last-resort save method using file token...`);
+                log(`[DEBUG] Attempting basic save method...`);
                 
-                const fs = require('uxp').storage.localFileSystem;
-                const tempFolder = await fs.getTemporaryFolder();
-                const fileName = outputPath.split('/').pop();
-                const tempFile = await tempFolder.createFile(fileName, { overwrite: true });
-                const saveToken = fs.createSessionToken(tempFile);
-                
-                const lastResortSaveDesc = {
+                const basicSaveDesc = {
                     _obj: "save",
                     as: {
-                        _obj: "PNGFormat",
-                        PNG8: false
+                        _obj: "PNGFormat"
                     },
-                    in: { _path: saveToken },
+                    in: { _path: outputPath },
                     copy: true,
                     _options: { 
                         dialogOptions: "dontDisplay"
                     }
                 };
                 
-                const lastResult = await batchPlay(
-                    [lastResortSaveDesc],
+                const basicResult = await batchPlay(
+                    [basicSaveDesc],
                     {
                         synchronousExecution: true,
                         modalBehavior: "none"
                     }
                 );
                 
-                log(`[DEBUG] Last-resort PNG Save completed to temp: ${tempFile.nativePath}`);
-                return lastResult;
+                log(`[DEBUG] Basic PNG Save completed successfully`);
+                return basicResult;
                 
-            } catch (lastError) {
+            } catch (basicError) {
                 log(`[DEBUG] All PNG save methods failed`);
                 throw new PluginError(
                     'Failed to save PNG (all methods failed)',
                     'PNG_SAVE_ERROR',
                     { 
                         originalError: error, 
-                        fallbackError, 
-                        lastError,
+                        exportError,
+                        basicError,
                         outputPath 
                     }
                 );
@@ -1228,48 +1183,10 @@ async function saveAsPSD(doc, outputPath) {
     try {
         log(`[DEBUG] Starting PSD save to: ${outputPath}`);
         
-        // Check if outputPath is already a session token
-        let sessionToken = outputPath;
+        // Determine if we're dealing with a path or a token
+        const isPath = typeof outputPath === 'string' && outputPath.includes('/');
         
-        // If it's a file path, create a file entry and get a session token
-        if (typeof outputPath === 'string' && outputPath.includes('/')) {
-            const fs = require('uxp').storage.localFileSystem;
-            const tempFolder = await fs.getTemporaryFolder();
-            
-            // Parse the output path to get just the filename
-            const pathParts = outputPath.split('/');
-            const fileName = pathParts[pathParts.length - 1];
-            
-            // Create the file entry in the output directory
-            const outputDir = pathParts.slice(0, -1).join('/');
-            log(`[DEBUG] Attempting to access output directory for PSD: ${outputDir}`);
-            
-            let outputFile;
-            try {
-                // Try to get the directory using the path
-                const outputDirEntry = await fs.getEntryWithUrl(`file:${outputDir}`);
-                if (!outputDirEntry || !outputDirEntry.isFolder) {
-                    throw new Error('Invalid output directory');
-                }
-                
-                // Create the file in the output directory
-                outputFile = await outputDirEntry.createFile(fileName, { overwrite: true });
-                log(`[DEBUG] Created PSD file entry at: ${outputFile.nativePath}`);
-            } catch (dirError) {
-                log(`[DEBUG] Error accessing output directory for PSD: ${dirError.message}`);
-                log(`[DEBUG] Attempting fallback to temporary folder...`);
-                
-                // Fallback to temp folder
-                outputFile = await tempFolder.createFile(fileName, { overwrite: true });
-                log(`[DEBUG] Created temporary PSD file at: ${outputFile.nativePath}`);
-            }
-            
-            // Create a session token for the file
-            sessionToken = fs.createSessionToken(outputFile);
-            log(`[DEBUG] Created session token for PSD file`);
-        }
-        
-        // Create the save descriptor with proper format
+        // For M1 Mac compatibility, use the simplest possible approach
         const saveDesc = {
             _obj: "save",
             as: {
@@ -1279,15 +1196,14 @@ async function saveAsPSD(doc, outputPath) {
                 layers: true,
                 maximizeCompatibility: true
             },
-            in: { _path: sessionToken },
+            in: { _path: outputPath },
             copy: true,
-            lowerCase: true,
             _options: { 
                 dialogOptions: "dontDisplay"
             }
         };
 
-        log("[DEBUG] Executing PSD save command...");
+        log(`[DEBUG] Executing PSD save command with ${isPath ? 'path' : 'token'}...`);
         
         const result = await batchPlay(
             [saveDesc],
@@ -1303,51 +1219,41 @@ async function saveAsPSD(doc, outputPath) {
     } catch (error) {
         log(`[DEBUG] PSD Save Failed: ${error.message}`);
         
-        // Try fallback method
+        // Try basic approach
         try {
-            log(`[DEBUG] Attempting fallback PSD save method...`);
+            log(`[DEBUG] Attempting basic PSD save method...`);
             
-            const fs = require('uxp').storage.localFileSystem;
-            const tempFolder = await fs.getTemporaryFolder();
-            const fileName = typeof outputPath === 'string' ? 
-                outputPath.split('/').pop() : 
-                `document_${Date.now()}.psd`;
-                
-            const tempFile = await tempFolder.createFile(fileName, { overwrite: true });
-            const saveToken = fs.createSessionToken(tempFile);
-            
-            const fallbackSaveDesc = {
+            const basicSaveDesc = {
                 _obj: "save",
                 as: {
-                    _obj: "photoshop35Format",
-                    maximizeCompatibility: true
+                    _obj: "photoshop35Format"
                 },
-                in: { _path: saveToken },
+                in: { _path: outputPath },
                 copy: true,
                 _options: { 
                     dialogOptions: "dontDisplay"
                 }
             };
             
-            const fallbackResult = await batchPlay(
-                [fallbackSaveDesc],
+            const basicResult = await batchPlay(
+                [basicSaveDesc],
                 {
                     synchronousExecution: true,
                     modalBehavior: "none"
                 }
             );
             
-            log(`[DEBUG] Fallback PSD Save completed to temp: ${tempFile.nativePath}`);
-            return fallbackResult;
+            log(`[DEBUG] Basic PSD Save completed successfully`);
+            return basicResult;
             
-        } catch (fallbackError) {
+        } catch (basicError) {
             log(`[DEBUG] All PSD save methods failed`);
             throw new PluginError(
                 'Failed to save PSD (all methods failed)',
                 'PSD_SAVE_ERROR',
                 { 
                     originalError: error, 
-                    fallbackError,
+                    basicError,
                     outputPath 
                 }
             );
@@ -1581,37 +1487,113 @@ async function processTextRow(row, index, total, folders) {
                 let pngFile, psdFile;
                 try {
                     // Create PNG file entry
+                    log(`[DEBUG] Attempting to create PNG file entry in folder: ${folders.pngFolder.nativePath}`);
                     pngFile = await folders.pngFolder.createFile(`${baseFileName}.png`, { overwrite: true });
                     log(`[DEBUG] Created PNG file entry: ${pngFile.nativePath}`);
                     
                     // Create PSD file entry
+                    log(`[DEBUG] Attempting to create PSD file entry in folder: ${folders.psdFolder.nativePath}`);
                     psdFile = await folders.psdFolder.createFile(`${baseFileName}.psd`, { overwrite: true });
                     log(`[DEBUG] Created PSD file entry: ${psdFile.nativePath}`);
                 } catch (fileCreateError) {
                     log(`[DEBUG] Error creating file entries: ${fileCreateError.message}`);
+                    log(`[DEBUG] Error details: ${JSON.stringify(fileCreateError)}`);
                     // Continue with path-based approach as fallback
                 }
 
                 // Save PNG - use file entry if available, otherwise use path
-                if (pngFile) {
-                    const fs = require('uxp').storage.localFileSystem;
-                    const pngToken = fs.createSessionToken(pngFile);
-                    await saveAsPNG(doc, pngToken);
-                    log(`[DEBUG] ✅ PNG saved successfully using file token: ${pngFile.nativePath}`);
-                } else {
-                    await saveAsPNG(doc, pngPath);
-                    log(`[DEBUG] ✅ PNG saved successfully using path: ${pngPath}`);
+                try {
+                    if (pngFile) {
+                        const fs = require('uxp').storage.localFileSystem;
+                        const pngToken = fs.createSessionToken(pngFile);
+                        log(`[DEBUG] Created session token for PNG file, now saving...`);
+                        await saveAsPNG(doc, pngToken);
+                        log(`[DEBUG] ✅ PNG saved successfully using file token: ${pngFile.nativePath}`);
+                    } else {
+                        log(`[DEBUG] No PNG file entry created, attempting direct path save to: ${pngPath}`);
+                        await saveAsPNG(doc, pngPath);
+                        log(`[DEBUG] ✅ PNG saved successfully using path: ${pngPath}`);
+                    }
+                } catch (pngSaveError) {
+                    log(`[DEBUG] ❌ PNG save failed: ${pngSaveError.message}`);
+                    log(`[DEBUG] Error details: ${JSON.stringify(pngSaveError)}`);
+                    
+                    // Try one more direct approach
+                    try {
+                        log(`[DEBUG] Attempting direct PNG save as last resort...`);
+                        const saveDesc = {
+                            _obj: "save",
+                            as: {
+                                _obj: "PNGFormat",
+                                PNG8: false
+                            },
+                            in: { _path: pngPath },
+                            copy: true,
+                            _options: { 
+                                dialogOptions: "dontDisplay"
+                            }
+                        };
+                        
+                        await batchPlay([saveDesc], { synchronousExecution: true });
+                        log(`[DEBUG] ✅ Direct PNG save succeeded`);
+                    } catch (directError) {
+                        log(`[DEBUG] ❌ Direct PNG save also failed: ${directError.message}`);
+                    }
                 }
 
                 // Save PSD - use file entry if available, otherwise use path
-                if (psdFile) {
-                    const fs = require('uxp').storage.localFileSystem;
-                    const psdToken = fs.createSessionToken(psdFile);
-                    await saveAsPSD(doc, psdToken);
-                    log(`[DEBUG] ✅ PSD saved successfully using file token: ${psdFile.nativePath}`);
-                } else {
-                    await saveAsPSD(doc, psdPath);
-                    log(`[DEBUG] ✅ PSD saved successfully using path: ${psdPath}`);
+                try {
+                    if (psdFile) {
+                        const fs = require('uxp').storage.localFileSystem;
+                        const psdToken = fs.createSessionToken(psdFile);
+                        log(`[DEBUG] Created session token for PSD file, now saving...`);
+                        await saveAsPSD(doc, psdToken);
+                        log(`[DEBUG] ✅ PSD saved successfully using file token: ${psdFile.nativePath}`);
+                    } else {
+                        log(`[DEBUG] No PSD file entry created, attempting direct path save to: ${psdPath}`);
+                        await saveAsPSD(doc, psdPath);
+                        log(`[DEBUG] ✅ PSD saved successfully using path: ${psdPath}`);
+                    }
+                } catch (psdSaveError) {
+                    log(`[DEBUG] ❌ PSD save failed: ${psdSaveError.message}`);
+                    log(`[DEBUG] Error details: ${JSON.stringify(psdSaveError)}`);
+                    
+                    // Try one more direct approach
+                    try {
+                        log(`[DEBUG] Attempting direct PSD save as last resort...`);
+                        const saveDesc = {
+                            _obj: "save",
+                            as: {
+                                _obj: "photoshop35Format",
+                                maximizeCompatibility: true
+                            },
+                            in: { _path: psdPath },
+                            copy: true,
+                            _options: { 
+                                dialogOptions: "dontDisplay"
+                            }
+                        };
+                        
+                        await batchPlay([saveDesc], { synchronousExecution: true });
+                        log(`[DEBUG] ✅ Direct PSD save succeeded`);
+                    } catch (directError) {
+                        log(`[DEBUG] ❌ Direct PSD save also failed: ${directError.message}`);
+                    }
+                }
+
+                // Check if files actually exist
+                try {
+                    const pngExists = await folders.pngFolder.getEntry(`${baseFileName}.png`);
+                    log(`[DEBUG] ✅ PNG file exists in output folder: ${pngExists.nativePath}`);
+                } catch (checkError) {
+                    log(`[DEBUG] ❌ PNG file does not exist in output folder: ${checkError.message}`);
+                }
+                
+                try {
+                    const psdExists = await folders.psdFolder.getEntry(`${baseFileName}.psd`);
+                    log(`[DEBUG] ✅ PSD file exists in output folder: ${psdExists.nativePath}`);
+                } catch (checkError) {
+                    log(`[DEBUG] ❌ PSD file does not exist in output folder: ${checkError.message}`);
                 }
 
                 // Write success to MCP relay
