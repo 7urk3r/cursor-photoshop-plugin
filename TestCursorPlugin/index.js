@@ -811,9 +811,14 @@ async function setupTextOutputFolders(outputFolder) {
             );
         }
 
+        // Ensure native paths are properly formatted for M1 Macs
+        // This helps with path compatibility issues on M1 architecture
+        folders.pngNativePath = folders.pngFolder.nativePath.replace(/\\/g, '/');
+        folders.psdNativePath = folders.psdFolder.nativePath.replace(/\\/g, '/');
+
         console.log("[DEBUG] Output folders ready:", {
-            png: folders.pngFolder.nativePath,
-            psd: folders.psdFolder.nativePath
+            png: folders.pngNativePath,
+            psd: folders.psdNativePath
         });
         
         return folders;
@@ -1042,21 +1047,22 @@ async function saveAsPNG(doc, outputPath) {
     try {
         log(`[DEBUG] Starting PNG save to: ${outputPath}`);
         
-        // Create the save descriptor
+        // Create the save descriptor with updated format for PS 2025 on M1
         const saveDesc = {
-            _obj: "save",
-            as: {
-                _obj: "PNGFormat",
+            _obj: "exportDocument",
+            documentID: doc._id,
+            format: {
+                _obj: "PNG",
+                PNG8: false,
+                transparency: true,
+                interlaced: false,
+                quality: 100
+            },
+            filePath: { _path: outputPath },
+            options: {
+                _obj: "PNGFormatOptions",
                 PNG8: false,
                 compression: 6
-            },
-            in: { _path: outputPath },
-            documentID: doc._id,
-            copy: true,
-            lowerCase: true,
-            saveStages: {
-                _enum: "saveStagesType",
-                _value: "saveBegin"
             },
             _options: { 
                 dialogOptions: "dontDisplay"
@@ -1078,11 +1084,44 @@ async function saveAsPNG(doc, outputPath) {
 
     } catch (error) {
         log(`[DEBUG] PNG Save Failed: ${error.message}`);
-        throw new PluginError(
-            'Failed to save PNG',
-            'PNG_SAVE_ERROR',
-            { originalError: error, outputPath }
-        );
+        
+        // Fallback method for PS 2025
+        try {
+            log(`[DEBUG] Attempting fallback PNG save method...`);
+            
+            const fallbackSaveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "PNGFormat",
+                    PNG8: false,
+                    transparency: true
+                },
+                in: { _path: outputPath },
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+            
+            const fallbackResult = await batchPlay(
+                [fallbackSaveDesc],
+                {
+                    synchronousExecution: true,
+                    modalBehavior: "none"
+                }
+            );
+            
+            log(`[DEBUG] Fallback PNG Save completed successfully: ${outputPath}`);
+            return fallbackResult;
+            
+        } catch (fallbackError) {
+            log(`[DEBUG] Fallback PNG Save also failed: ${fallbackError.message}`);
+            throw new PluginError(
+                'Failed to save PNG (both primary and fallback methods failed)',
+                'PNG_SAVE_ERROR',
+                { originalError: error, fallbackError, outputPath }
+            );
+        }
     }
 }
 
@@ -1158,37 +1197,71 @@ async function ensureDocumentInitialized() {
             const tempFolder = await fs.getTemporaryFolder();
             const savePath = `${tempFolder.nativePath}/${tempName}`;
             
-            // Perform initial save to get document ID
-            const saveCommand = {
-                _obj: "save",
-                as: {
-                    _obj: "photoshop35Format",
-                    maximizeCompatibility: true
-                },
-                in: { _path: savePath },
-                copy: true,
-                lowerCase: true,
-                saveStages: {
-                    _enum: "saveStagesType",
-                    _value: "saveBegin"
-                },
-                _options: { 
-                    dialogOptions: "dontDisplay"
-                }
-            };
+            log(`[DEBUG] Attempting to initialize document with temp save to: ${savePath}`);
+            
+            // Perform initial save to get document ID - try multiple approaches for M1 compatibility
+            try {
+                // First approach - standard save
+                const saveCommand = {
+                    _obj: "save",
+                    as: {
+                        _obj: "photoshop35Format",
+                        maximizeCompatibility: true
+                    },
+                    in: { _path: savePath },
+                    copy: true,
+                    lowerCase: true,
+                    _options: { 
+                        dialogOptions: "dontDisplay"
+                    }
+                };
 
-            await batchPlay(
-                [saveCommand],
-                {
-                    synchronousExecution: true,
-                    modalBehavior: "none"
+                await batchPlay(
+                    [saveCommand],
+                    {
+                        synchronousExecution: true,
+                        modalBehavior: "none"
+                    }
+                );
+            } catch (saveError) {
+                log(`[DEBUG] Standard save failed: ${saveError.message}, trying alternative approach...`);
+                
+                // Second approach - alternative save format for M1
+                try {
+                    const altSaveCommand = {
+                        _obj: "save",
+                        as: {
+                            _obj: "photoshop35Format",
+                            maximizeCompatibility: true
+                        },
+                        in: savePath,
+                        documentID: app.activeDocument._id,
+                        copy: true,
+                        _options: { 
+                            dialogOptions: "dontDisplay"
+                        }
+                    };
+    
+                    await batchPlay(
+                        [altSaveCommand],
+                        {
+                            synchronousExecution: true,
+                            modalBehavior: "none"
+                        }
+                    );
+                } catch (altSaveError) {
+                    log(`[DEBUG] Alternative save also failed: ${altSaveError.message}`);
+                    throw altSaveError;
                 }
-            );
+            }
 
             log(`[Cursor OK] Document initialized with temporary save: ${tempName}`);
             
+            // Force refresh document reference
+            const refreshedDoc = app.activeDocument;
+            
             // Verify document now has ID
-            if (!app.activeDocument._id) {
+            if (!refreshedDoc || !refreshedDoc._id) {
                 throw new PluginError('Failed to initialize document ID', 'DOC_INIT_FAILED');
             }
 
@@ -1309,16 +1382,12 @@ async function processTextRow(row, index, total, folders) {
                 const text1Content = row.text1 || 'default';
                 const text2Content = row.text2 || '';
                 
-                // Create safe filename by removing invalid characters
-                const safeText1 = text1Content.replace(/[^a-zA-Z0-9]/g, '_');
-                const safeText2 = text2Content.replace(/[^a-zA-Z0-9]/g, '_');
+                // Generate filenames for output
+                const baseFileName = `${text1Content}_${text2Content}`.replace(/[^a-zA-Z0-9]/g, '_');
                 
-                // Construct filename
-                const baseFileName = `${safeText1}_${safeText2}`.replace(/_+/g, '_').replace(/^_|_$/g, '');
-                
-                // Construct full paths
-                const pngPath = `${folders.pngFolder.nativePath}/${baseFileName}.png`;
-                const psdPath = `${folders.psdFolder.nativePath}/${baseFileName}.psd`;
+                // Use the normalized paths for M1 compatibility
+                const pngPath = `${folders.pngNativePath || folders.pngFolder.nativePath}/${baseFileName}.png`;
+                const psdPath = `${folders.psdNativePath || folders.psdFolder.nativePath}/${baseFileName}.psd`;
 
                 log("[DEBUG] Starting file saves:", {
                     filename: baseFileName,
