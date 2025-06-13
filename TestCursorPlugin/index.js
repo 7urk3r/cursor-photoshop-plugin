@@ -776,11 +776,68 @@ async function setupTextOutputFolders(outputFolder) {
             );
         }
         
+        // Check PSD folder, create if not exists
+        try {
+            console.log("[DEBUG] Checking Text_PSD folder...");
+            try {
+                folders.psdFolder = await outputFolder.getEntry('Text_PSD');
+                if (!folders.psdFolder.isFolder) {
+                    throw new Error('Text_PSD exists but is not a folder');
+                }
+                console.log("[DEBUG] Found existing Text_PSD folder:", folders.psdFolder.nativePath);
+            } catch (notFoundError) {
+                // If the folder doesn't exist, create it
+                console.log("[DEBUG] Text_PSD folder not found, creating new one...");
+                folders.psdFolder = await outputFolder.createEntry('Text_PSD', { type: 'folder' });
+                console.log("[DEBUG] Created new Text_PSD folder:", folders.psdFolder.nativePath);
+            }
+            
+            // Verify the folder was created
+            if (!folders.psdFolder || !folders.psdFolder.isFolder) {
+                throw new PluginError('Failed to create PSD folder', 'FOLDER_CREATE_ERROR');
+            }
+        } catch (error) {
+            console.error("[DEBUG] Error with PSD folder:", error);
+            throw new PluginError(
+                'Failed to create Text_PSD folder',
+                'FOLDER_CREATE_ERROR',
+                { path: 'Text_PSD', error }
+            );
+        }
+
+        // Verify both folders are accessible
+        try {
+            const pngExists = await folders.pngFolder.isEntry;
+            const psdExists = await folders.psdFolder.isEntry;
+            
+            if (!pngExists || !psdExists) {
+                throw new PluginError(
+                    'Could not verify folder access', 
+                    'FOLDER_ACCESS_ERROR',
+                    {
+                        pngExists,
+                        psdExists,
+                        pngPath: folders.pngFolder?.nativePath,
+                        psdPath: folders.psdFolder?.nativePath
+                    }
+                );
+            }
+        } catch (verifyError) {
+            console.error("[DEBUG] Folder verification failed:", verifyError);
+            throw new PluginError(
+                'Failed to verify folder access', 
+                'FOLDER_VERIFY_ERROR',
+                { error: verifyError }
+            );
+        }
+        
         // Ensure native paths are properly formatted for M1 Macs
         folders.pngNativePath = folders.pngFolder.nativePath.replace(/\\/g, '/');
+        folders.psdNativePath = folders.psdFolder.nativePath.replace(/\\/g, '/');
 
         console.log("[DEBUG] Output folders ready:", {
-            png: folders.pngNativePath
+            png: folders.pngNativePath,
+            psd: folders.psdNativePath
         });
         
         return folders;
@@ -810,6 +867,13 @@ async function setupImageOutputFolders(outputFolder) {
             folders.pngFolder = await outputFolder.getEntry('Image_PNG');
         } catch (error) {
             folders.pngFolder = await outputFolder.createEntry('Image_PNG', { type: 'folder' });
+        }
+        
+        // Create PSD folder for image operations
+        try {
+            folders.psdFolder = await outputFolder.getEntry('Image_PSD');
+        } catch (error) {
+            folders.psdFolder = await outputFolder.createEntry('Image_PSD', { type: 'folder' });
         }
         
         return folders;
@@ -1246,6 +1310,264 @@ async function saveAsPNG(doc, outputPath) {
     }
 }
 
+// Updated PSD save function with proper API v2 format
+async function saveAsPSD(doc, outputPath) {
+    try {
+        log(`[DEBUG] Starting PSD save to: ${outputPath}`);
+        console.log(`[CURSOR SAVE] Starting PSD save to: ${outputPath}`);
+        
+        // Check if we're dealing with a file token or a path string
+        const isToken = typeof outputPath !== 'string';
+        
+        // For debugging
+        log(`[DEBUG] Save PSD using ${isToken ? 'token' : 'path string'}: ${isToken ? 'File Token' : outputPath}`);
+        console.log(`[CURSOR SAVE] Save PSD using ${isToken ? 'token' : 'path string'}: ${isToken ? 'File Token' : outputPath}`);
+        
+        // APPROACH 1: Use direct file system API for most reliable method
+        try {
+            log(`[DEBUG] APPROACH 1: Attempting direct file system API save for PSD...`);
+            console.log(`[CURSOR SAVE] APPROACH 1: Attempting direct file system API save for PSD...`);
+            
+            const fs = require('uxp').storage.localFileSystem;
+            const formats = require('uxp').storage.formats;
+            
+            // Parse the path to get directory and filename if it's a string path
+            let outputFile;
+            if (!isToken) {
+                try {
+                    // Extract directory path and filename
+                    const pathParts = outputPath.split('/');
+                    const fileName = pathParts.pop();
+                    const dirPath = pathParts.join('/');
+                    
+                    log(`[DEBUG] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
+                    console.log(`[CURSOR SAVE] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
+                    
+                    // Get the directory
+                    const directory = await fs.getFolder(dirPath);
+                    log(`[DEBUG] Got directory: ${directory.nativePath}`);
+                    console.log(`[CURSOR SAVE] Got directory: ${directory.nativePath}`);
+                    
+                    // Create or get the file
+                    outputFile = await directory.createFile(fileName, { overwrite: true });
+                    log(`[DEBUG] Created output file: ${outputFile.nativePath}`);
+                    console.log(`[CURSOR SAVE] Created output file: ${outputFile.nativePath}`);
+                } catch (parseError) {
+                    log(`[DEBUG] Path parsing error: ${parseError.message}`);
+                    console.log(`[CURSOR SAVE] Path parsing error: ${parseError.message}`);
+                    throw parseError;
+                }
+            } else {
+                outputFile = outputPath;
+                log(`[DEBUG] Using provided file token`);
+                console.log(`[CURSOR SAVE] Using provided file token`);
+            }
+            
+            // Save to temporary file first
+            log(`[DEBUG] Creating temporary file for PSD save...`);
+            console.log(`[CURSOR SAVE] Creating temporary file for PSD save...`);
+            const tempFile = await fs.createTemporaryFile("temp-psd-");
+            log(`[DEBUG] Created temp file: ${tempFile.nativePath}`);
+            console.log(`[CURSOR SAVE] Created temp file: ${tempFile.nativePath}`);
+            
+            // Create a session token for the temp file
+            const tempToken = fs.createSessionToken(tempFile);
+            
+            // Use save to save to temp file
+            log(`[DEBUG] Saving document to temp file...`);
+            console.log(`[CURSOR SAVE] Saving document to temp file...`);
+            const saveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "photoshop35Format",
+                    alphaChannels: true,
+                    embedColorProfile: true,
+                    layers: true,
+                    maximizeCompatibility: true
+                },
+                in: tempToken,
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+            
+            await batchPlay([saveDesc], { synchronousExecution: true });
+            log(`[DEBUG] Successfully saved to temp file`);
+            console.log(`[CURSOR SAVE] Successfully saved to temp file`);
+            
+            // Read temp file content
+            log(`[DEBUG] Reading temp file content...`);
+            console.log(`[CURSOR SAVE] Reading temp file content...`);
+            const tempContent = await tempFile.read({ format: formats.binary });
+            log(`[DEBUG] Read ${tempContent.byteLength} bytes from temp file`);
+            console.log(`[CURSOR SAVE] Read ${tempContent.byteLength} bytes from temp file`);
+            
+            // Write content to final destination
+            log(`[DEBUG] Writing content to final destination...`);
+            console.log(`[CURSOR SAVE] Writing content to final destination...`);
+            await outputFile.write(tempContent, { format: formats.binary });
+            log(`[DEBUG] ✅ Successfully wrote PSD file: ${outputFile.nativePath}`);
+            console.log(`[CURSOR SAVE] ✅ Successfully wrote PSD file: ${outputFile.nativePath}`);
+            
+            // Clean up temp file
+            await tempFile.delete();
+            log(`[DEBUG] Cleaned up temp file`);
+            console.log(`[CURSOR SAVE] Cleaned up temp file`);
+            
+            return { success: true, method: "direct-fs", path: outputFile.nativePath };
+        } catch (directFsError) {
+            log(`[DEBUG] Direct file system approach failed for PSD: ${directFsError.message}`);
+            console.log(`[CURSOR SAVE] ❌ Direct file system approach failed for PSD: ${directFsError.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(directFsError)}`);
+            
+            // Continue to next approach
+        }
+        
+        // APPROACH 2: Use direct File object approach
+        try {
+            log(`[DEBUG] APPROACH 2: Attempting direct File object save for PSD...`);
+            console.log(`[CURSOR SAVE] APPROACH 2: Attempting direct File object save for PSD...`);
+            
+            // Only works with path string
+            if (!isToken) {
+                // Create a File object directly
+                const File = require('uxp').storage.File;
+                const fileObj = new File(outputPath);
+                
+                log(`[DEBUG] Created File object: ${fileObj.nativePath}`);
+                console.log(`[CURSOR SAVE] Created File object: ${fileObj.nativePath}`);
+                
+                // Use save with the File object
+                const saveDesc = {
+                    _obj: "save",
+                    as: {
+                        _obj: "photoshop35Format",
+                        alphaChannels: true,
+                        embedColorProfile: true,
+                        layers: true,
+                        maximizeCompatibility: true
+                    },
+                    in: fileObj,
+                    copy: true,
+                    _options: { 
+                        dialogOptions: "dontDisplay"
+                    }
+                };
+                
+                const result = await batchPlay(
+                    [saveDesc],
+                    {
+                        synchronousExecution: true,
+                        modalBehavior: "none"
+                    }
+                );
+                
+                log(`[DEBUG] ✅ Direct File object PSD save completed successfully`);
+                console.log(`[CURSOR SAVE] ✅ Direct File object PSD save completed successfully`);
+                return { success: true, method: "direct-file-object", result };
+            } else {
+                log(`[DEBUG] Skipping direct File object approach for token`);
+                console.log(`[CURSOR SAVE] Skipping direct File object approach for token`);
+                throw new Error('File object approach only works with path strings');
+            }
+        } catch (fileObjError) {
+            log(`[DEBUG] Direct File object approach failed: ${fileObjError.message}`);
+            console.log(`[CURSOR SAVE] ❌ Direct File object approach failed: ${fileObjError.message}`);
+            
+            // Continue to next approach
+        }
+        
+        // APPROACH 3: Use standard save
+        try {
+            log(`[DEBUG] APPROACH 3: Attempting standard PSD save method...`);
+            console.log(`[CURSOR SAVE] APPROACH 3: Attempting standard PSD save method...`);
+            
+            const saveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "photoshop35Format",
+                    alphaChannels: true,
+                    embedColorProfile: true,
+                    layers: true,
+                    maximizeCompatibility: true
+                },
+                in: isToken ? outputPath : { _path: outputPath },
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+
+            const result = await batchPlay(
+                [saveDesc],
+                {
+                    synchronousExecution: true,
+                    modalBehavior: "none"
+                }
+            );
+
+            log(`[DEBUG] ✅ PSD Save completed successfully`);
+            console.log(`[CURSOR SAVE] ✅ PSD Save completed successfully`);
+            return { success: true, method: "standardSave", result };
+        } catch (error) {
+            log(`[DEBUG] Standard PSD Save Failed: ${error.message}`);
+            console.log(`[CURSOR SAVE] ❌ Standard PSD Save Failed: ${error.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(error)}`);
+            
+            // Try basic approach
+            try {
+                log(`[DEBUG] APPROACH 4: Attempting basic PSD save method...`);
+                console.log(`[CURSOR SAVE] APPROACH 4: Attempting basic PSD save method...`);
+                
+                const basicSaveDesc = {
+                    _obj: "save",
+                    as: {
+                        _obj: "photoshop35Format"
+                    },
+                    in: isToken ? outputPath : { _path: outputPath },
+                    copy: true,
+                    _options: { 
+                        dialogOptions: "dontDisplay"
+                    }
+                };
+                
+                const basicResult = await batchPlay(
+                    [basicSaveDesc],
+                    {
+                        synchronousExecution: true,
+                        modalBehavior: "none"
+                    }
+                );
+                
+                log(`[DEBUG] ✅ Basic PSD Save completed successfully`);
+                console.log(`[CURSOR SAVE] ✅ Basic PSD Save completed successfully`);
+                return { success: true, method: "basicSave", result: basicResult };
+            } catch (basicError) {
+                log(`[DEBUG] All PSD save methods failed`);
+                console.log(`[CURSOR SAVE] ❌ All PSD save methods failed`);
+                log(`[DEBUG] Error details: ${JSON.stringify(basicError)}`);
+                throw new PluginError(
+                    'Failed to save PSD (all methods failed)',
+                    'PSD_SAVE_ERROR',
+                    { 
+                        directFsError: directFsError?.message,
+                        fileObjError: fileObjError?.message,
+                        standardError: error.message, 
+                        basicError: basicError.message,
+                        outputPath 
+                    }
+                );
+            }
+        }
+    } catch (error) {
+        log(`[DEBUG] PSD Save Failed with critical error: ${error.message}`);
+        console.log(`[CURSOR SAVE] ❌ PSD Save Failed with critical error: ${error.message}`);
+        log(`[DEBUG] Stack trace: ${error.stack}`);
+        throw error;
+    }
+}
+
 // Add document initialization function
 async function ensureDocumentInitialized() {
     try {
@@ -1556,7 +1878,7 @@ async function processTextRow(row, index, total, folders) {
                 const baseFileName = `${text1Content}_${text2Content}`.replace(/[^a-zA-Z0-9]/g, '_');
                 
                 // Ensure we have valid folder paths
-                if (!folders || !folders.pngFolder) {
+                if (!folders || !folders.pngFolder || !folders.psdFolder) {
                     log(`[DEBUG] ❌ Invalid folder structure for saving: ${JSON.stringify(folders)}`);
                     console.log(`[CURSOR SAVE] ❌ Invalid folder structure for saving: ${JSON.stringify(folders)}`);
                     throw new Error('Invalid folder structure for saving');
@@ -1564,20 +1886,24 @@ async function processTextRow(row, index, total, folders) {
                 
                 // Get native paths with proper formatting
                 const pngNativePath = folders.pngNativePath || folders.pngFolder.nativePath;
+                const psdNativePath = folders.psdNativePath || folders.psdFolder.nativePath;
                 
                 // Ensure paths are properly formatted for M1 Mac
                 const pngPath = `${pngNativePath.replace(/\\/g, '/')}/${baseFileName}.png`;
+                const psdPath = `${psdNativePath.replace(/\\/g, '/')}/${baseFileName}.psd`;
 
                 log("[DEBUG] Starting file saves for row " + index + ":", {
                     filename: baseFileName,
                     png: pngPath,
+                    psd: psdPath,
                     text1: text1Content,
                     text2: text2Content,
                     timestamp: new Date().toISOString()
                 });
                 console.log(`[CURSOR SAVE] Starting file saves for row ${index}:`, {
                     filename: baseFileName,
-                    png: pngPath
+                    png: pngPath,
+                    psd: psdPath
                 });
 
                 // Save PNG file using direct save first
@@ -1605,6 +1931,35 @@ async function processTextRow(row, index, total, folders) {
                             error: pngError.message,
                             directError: directPngError.message,
                             path: pngPath
+                        });
+                    }
+                }
+
+                // Save PSD file using direct save first
+                let psdSaved = false;
+                try {
+                    console.log(`[CURSOR SAVE] Attempting direct PSD save...`);
+                    const directPsdResult = await directSaveFile(doc, psdPath, 'PSD');
+                    console.log(`[CURSOR SAVE] ✅ Direct PSD save succeeded:`, directPsdResult);
+                    psdSaved = true;
+                    filesSaved.psd = true;
+                } catch (directPsdError) {
+                    console.log(`[CURSOR SAVE] ❌ Direct PSD save failed: ${directPsdError.message}`);
+                    
+                    // Fall back to regular save methods
+                    try {
+                        console.log(`[CURSOR SAVE] Falling back to regular PSD save methods...`);
+                        const psdSaveResult = await saveAsPSD(doc, psdPath);
+                        console.log(`[CURSOR SAVE] ✅ PSD save result:`, psdSaveResult);
+                        psdSaved = true;
+                        filesSaved.psd = true;
+                    } catch (psdError) {
+                        console.log(`[CURSOR SAVE] ❌ All PSD save methods failed`);
+                        errors.push({
+                            type: 'PSD_SAVE',
+                            error: psdError.message,
+                            directError: directPsdError.message,
+                            path: psdPath
                         });
                     }
                 }
@@ -1644,17 +1999,53 @@ async function processTextRow(row, index, total, folders) {
                             filesSaved.png = false;
                         }
                     }
+                    
+                    // Verify PSD file
+                    if (psdSaved) {
+                        try {
+                            // Extract directory path and filename
+                            const pathParts = psdPath.split('/');
+                            const fileName = pathParts.pop();
+                            const dirPath = pathParts.join('/');
+                            
+                            // Get the directory
+                            const psdDir = await fs.getFolder(dirPath);
+                            const psdExists = await psdDir.getEntry(fileName);
+                            
+                            if (psdExists) {
+                                log(`[DEBUG] ✅ PSD file verified: ${psdExists.nativePath}`);
+                                console.log(`[CURSOR SAVE] ✅ PSD file verified: ${psdExists.nativePath}`);
+                                log(`[DEBUG] PSD file size: ${await psdExists.size} bytes`);
+                                console.log(`[CURSOR SAVE] PSD file size: ${await psdExists.size} bytes`);
+                                filesSaved.psd = true;
+                            } else {
+                                log(`[DEBUG] ❌ PSD file not found after save`);
+                                console.log(`[CURSOR SAVE] ❌ PSD file not found after save`);
+                                filesSaved.psd = false;
+                            }
+                        } catch (psdVerifyError) {
+                            log(`[DEBUG] ❌ PSD file verification failed: ${psdVerifyError.message}`);
+                            console.log(`[CURSOR SAVE] ❌ PSD file verification failed: ${psdVerifyError.message}`);
+                            filesSaved.psd = false;
+                        }
+                    }
                 } catch (verifyError) {
                     log(`[DEBUG] File verification error: ${verifyError.message}`);
                     console.log(`[CURSOR SAVE] File verification error: ${verifyError.message}`);
                 }
 
                 // Log file save summary
-                if (pngSaved) {
+                if (pngSaved || psdSaved) {
                     log(`[DEBUG] ✅ Row ${index} processing complete with files saved:`);
                     console.log(`[CURSOR SAVE] ✅ Row ${index} processing complete with files saved:`);
-                    log(`[DEBUG]   - PNG: ${pngPath}`);
-                    console.log(`[CURSOR SAVE]   - PNG: ${pngPath}`);
+                    if (pngSaved) {
+                        log(`[DEBUG]   - PNG: ${pngPath}`);
+                        console.log(`[CURSOR SAVE]   - PNG: ${pngPath}`);
+                    }
+                    if (psdSaved) {
+                        log(`[DEBUG]   - PSD: ${psdPath}`);
+                        console.log(`[CURSOR SAVE]   - PSD: ${psdPath}`);
+                    }
                 } else {
                     log(`[DEBUG] ❌ Row ${index} processing complete but NO FILES SAVED`);
                     console.log(`[CURSOR SAVE] ❌ Row ${index} processing complete but NO FILES SAVED`);
@@ -1665,7 +2056,8 @@ async function processTextRow(row, index, total, folders) {
                     await writeToMCPRelay({
                         status: 'success',
                         files: {
-                            png: pngSaved ? pngPath : null
+                            png: pngSaved ? pngPath : null,
+                            psd: psdSaved ? psdPath : null
                         },
                         timestamp: new Date().toISOString()
                     });
@@ -2052,11 +2444,68 @@ async function setupTextOutputFolders(outputFolder) {
             );
         }
         
+        // Check PSD folder, create if not exists
+        try {
+            console.log("[DEBUG] Checking Text_PSD folder...");
+            try {
+                folders.psdFolder = await outputFolder.getEntry('Text_PSD');
+                if (!folders.psdFolder.isFolder) {
+                    throw new Error('Text_PSD exists but is not a folder');
+                }
+                console.log("[DEBUG] Found existing Text_PSD folder:", folders.psdFolder.nativePath);
+            } catch (notFoundError) {
+                // If the folder doesn't exist, create it
+                console.log("[DEBUG] Text_PSD folder not found, creating new one...");
+                folders.psdFolder = await outputFolder.createEntry('Text_PSD', { type: 'folder' });
+                console.log("[DEBUG] Created new Text_PSD folder:", folders.psdFolder.nativePath);
+            }
+            
+            // Verify the folder was created
+            if (!folders.psdFolder || !folders.psdFolder.isFolder) {
+                throw new PluginError('Failed to create PSD folder', 'FOLDER_CREATE_ERROR');
+            }
+        } catch (error) {
+            console.error("[DEBUG] Error with PSD folder:", error);
+            throw new PluginError(
+                'Failed to create Text_PSD folder',
+                'FOLDER_CREATE_ERROR',
+                { path: 'Text_PSD', error }
+            );
+        }
+
+        // Verify both folders are accessible
+        try {
+            const pngExists = await folders.pngFolder.isEntry;
+            const psdExists = await folders.psdFolder.isEntry;
+            
+            if (!pngExists || !psdExists) {
+                throw new PluginError(
+                    'Could not verify folder access', 
+                    'FOLDER_ACCESS_ERROR',
+                    {
+                        pngExists,
+                        psdExists,
+                        pngPath: folders.pngFolder?.nativePath,
+                        psdPath: folders.psdFolder?.nativePath
+                    }
+                );
+            }
+        } catch (verifyError) {
+            console.error("[DEBUG] Folder verification failed:", verifyError);
+            throw new PluginError(
+                'Failed to verify folder access', 
+                'FOLDER_VERIFY_ERROR',
+                { error: verifyError }
+            );
+        }
+        
         // Ensure native paths are properly formatted for M1 Macs
         folders.pngNativePath = folders.pngFolder.nativePath.replace(/\\/g, '/');
+        folders.psdNativePath = folders.psdFolder.nativePath.replace(/\\/g, '/');
 
         console.log("[DEBUG] Output folders ready:", {
-            png: folders.pngNativePath
+            png: folders.pngNativePath,
+            psd: folders.psdNativePath
         });
         
         return folders;
@@ -2086,6 +2535,13 @@ async function setupImageOutputFolders(outputFolder) {
             folders.pngFolder = await outputFolder.getEntry('Image_PNG');
         } catch (error) {
             folders.pngFolder = await outputFolder.createEntry('Image_PNG', { type: 'folder' });
+        }
+        
+        // Create PSD folder for image operations
+        try {
+            folders.psdFolder = await outputFolder.getEntry('Image_PSD');
+        } catch (error) {
+            folders.psdFolder = await outputFolder.createEntry('Image_PSD', { type: 'folder' });
         }
         
         return folders;
@@ -2522,6 +2978,264 @@ async function saveAsPNG(doc, outputPath) {
     }
 }
 
+// Updated PSD save function with proper API v2 format
+async function saveAsPSD(doc, outputPath) {
+    try {
+        log(`[DEBUG] Starting PSD save to: ${outputPath}`);
+        console.log(`[CURSOR SAVE] Starting PSD save to: ${outputPath}`);
+        
+        // Check if we're dealing with a file token or a path string
+        const isToken = typeof outputPath !== 'string';
+        
+        // For debugging
+        log(`[DEBUG] Save PSD using ${isToken ? 'token' : 'path string'}: ${isToken ? 'File Token' : outputPath}`);
+        console.log(`[CURSOR SAVE] Save PSD using ${isToken ? 'token' : 'path string'}: ${isToken ? 'File Token' : outputPath}`);
+        
+        // APPROACH 1: Use direct file system API for most reliable method
+        try {
+            log(`[DEBUG] APPROACH 1: Attempting direct file system API save for PSD...`);
+            console.log(`[CURSOR SAVE] APPROACH 1: Attempting direct file system API save for PSD...`);
+            
+            const fs = require('uxp').storage.localFileSystem;
+            const formats = require('uxp').storage.formats;
+            
+            // Parse the path to get directory and filename if it's a string path
+            let outputFile;
+            if (!isToken) {
+                try {
+                    // Extract directory path and filename
+                    const pathParts = outputPath.split('/');
+                    const fileName = pathParts.pop();
+                    const dirPath = pathParts.join('/');
+                    
+                    log(`[DEBUG] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
+                    console.log(`[CURSOR SAVE] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
+                    
+                    // Get the directory
+                    const directory = await fs.getFolder(dirPath);
+                    log(`[DEBUG] Got directory: ${directory.nativePath}`);
+                    console.log(`[CURSOR SAVE] Got directory: ${directory.nativePath}`);
+                    
+                    // Create or get the file
+                    outputFile = await directory.createFile(fileName, { overwrite: true });
+                    log(`[DEBUG] Created output file: ${outputFile.nativePath}`);
+                    console.log(`[CURSOR SAVE] Created output file: ${outputFile.nativePath}`);
+                } catch (parseError) {
+                    log(`[DEBUG] Path parsing error: ${parseError.message}`);
+                    console.log(`[CURSOR SAVE] Path parsing error: ${parseError.message}`);
+                    throw parseError;
+                }
+            } else {
+                outputFile = outputPath;
+                log(`[DEBUG] Using provided file token`);
+                console.log(`[CURSOR SAVE] Using provided file token`);
+            }
+            
+            // Save to temporary file first
+            log(`[DEBUG] Creating temporary file for PSD save...`);
+            console.log(`[CURSOR SAVE] Creating temporary file for PSD save...`);
+            const tempFile = await fs.createTemporaryFile("temp-psd-");
+            log(`[DEBUG] Created temp file: ${tempFile.nativePath}`);
+            console.log(`[CURSOR SAVE] Created temp file: ${tempFile.nativePath}`);
+            
+            // Create a session token for the temp file
+            const tempToken = fs.createSessionToken(tempFile);
+            
+            // Use save to save to temp file
+            log(`[DEBUG] Saving document to temp file...`);
+            console.log(`[CURSOR SAVE] Saving document to temp file...`);
+            const saveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "photoshop35Format",
+                    alphaChannels: true,
+                    embedColorProfile: true,
+                    layers: true,
+                    maximizeCompatibility: true
+                },
+                in: tempToken,
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+            
+            await batchPlay([saveDesc], { synchronousExecution: true });
+            log(`[DEBUG] Successfully saved to temp file`);
+            console.log(`[CURSOR SAVE] Successfully saved to temp file`);
+            
+            // Read temp file content
+            log(`[DEBUG] Reading temp file content...`);
+            console.log(`[CURSOR SAVE] Reading temp file content...`);
+            const tempContent = await tempFile.read({ format: formats.binary });
+            log(`[DEBUG] Read ${tempContent.byteLength} bytes from temp file`);
+            console.log(`[CURSOR SAVE] Read ${tempContent.byteLength} bytes from temp file`);
+            
+            // Write content to final destination
+            log(`[DEBUG] Writing content to final destination...`);
+            console.log(`[CURSOR SAVE] Writing content to final destination...`);
+            await outputFile.write(tempContent, { format: formats.binary });
+            log(`[DEBUG] ✅ Successfully wrote PSD file: ${outputFile.nativePath}`);
+            console.log(`[CURSOR SAVE] ✅ Successfully wrote PSD file: ${outputFile.nativePath}`);
+            
+            // Clean up temp file
+            await tempFile.delete();
+            log(`[DEBUG] Cleaned up temp file`);
+            console.log(`[CURSOR SAVE] Cleaned up temp file`);
+            
+            return { success: true, method: "direct-fs", path: outputFile.nativePath };
+        } catch (directFsError) {
+            log(`[DEBUG] Direct file system approach failed for PSD: ${directFsError.message}`);
+            console.log(`[CURSOR SAVE] ❌ Direct file system approach failed for PSD: ${directFsError.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(directFsError)}`);
+            
+            // Continue to next approach
+        }
+        
+        // APPROACH 2: Use direct File object approach
+        try {
+            log(`[DEBUG] APPROACH 2: Attempting direct File object save for PSD...`);
+            console.log(`[CURSOR SAVE] APPROACH 2: Attempting direct File object save for PSD...`);
+            
+            // Only works with path string
+            if (!isToken) {
+                // Create a File object directly
+                const File = require('uxp').storage.File;
+                const fileObj = new File(outputPath);
+                
+                log(`[DEBUG] Created File object: ${fileObj.nativePath}`);
+                console.log(`[CURSOR SAVE] Created File object: ${fileObj.nativePath}`);
+                
+                // Use save with the File object
+                const saveDesc = {
+                    _obj: "save",
+                    as: {
+                        _obj: "photoshop35Format",
+                        alphaChannels: true,
+                        embedColorProfile: true,
+                        layers: true,
+                        maximizeCompatibility: true
+                    },
+                    in: fileObj,
+                    copy: true,
+                    _options: { 
+                        dialogOptions: "dontDisplay"
+                    }
+                };
+                
+                const result = await batchPlay(
+                    [saveDesc],
+                    {
+                        synchronousExecution: true,
+                        modalBehavior: "none"
+                    }
+                );
+                
+                log(`[DEBUG] ✅ Direct File object PSD save completed successfully`);
+                console.log(`[CURSOR SAVE] ✅ Direct File object PSD save completed successfully`);
+                return { success: true, method: "direct-file-object", result };
+            } else {
+                log(`[DEBUG] Skipping direct File object approach for token`);
+                console.log(`[CURSOR SAVE] Skipping direct File object approach for token`);
+                throw new Error('File object approach only works with path strings');
+            }
+        } catch (fileObjError) {
+            log(`[DEBUG] Direct File object approach failed: ${fileObjError.message}`);
+            console.log(`[CURSOR SAVE] ❌ Direct File object approach failed: ${fileObjError.message}`);
+            
+            // Continue to next approach
+        }
+        
+        // APPROACH 3: Use standard save
+        try {
+            log(`[DEBUG] APPROACH 3: Attempting standard PSD save method...`);
+            console.log(`[CURSOR SAVE] APPROACH 3: Attempting standard PSD save method...`);
+            
+            const saveDesc = {
+                _obj: "save",
+                as: {
+                    _obj: "photoshop35Format",
+                    alphaChannels: true,
+                    embedColorProfile: true,
+                    layers: true,
+                    maximizeCompatibility: true
+                },
+                in: isToken ? outputPath : { _path: outputPath },
+                copy: true,
+                _options: { 
+                    dialogOptions: "dontDisplay"
+                }
+            };
+
+            const result = await batchPlay(
+                [saveDesc],
+                {
+                    synchronousExecution: true,
+                    modalBehavior: "none"
+                }
+            );
+
+            log(`[DEBUG] ✅ PSD Save completed successfully`);
+            console.log(`[CURSOR SAVE] ✅ PSD Save completed successfully`);
+            return { success: true, method: "standardSave", result };
+        } catch (error) {
+            log(`[DEBUG] Standard PSD Save Failed: ${error.message}`);
+            console.log(`[CURSOR SAVE] ❌ Standard PSD Save Failed: ${error.message}`);
+            log(`[DEBUG] Error details: ${JSON.stringify(error)}`);
+            
+            // Try basic approach
+            try {
+                log(`[DEBUG] APPROACH 4: Attempting basic PSD save method...`);
+                console.log(`[CURSOR SAVE] APPROACH 4: Attempting basic PSD save method...`);
+                
+                const basicSaveDesc = {
+                    _obj: "save",
+                    as: {
+                        _obj: "photoshop35Format"
+                    },
+                    in: isToken ? outputPath : { _path: outputPath },
+                    copy: true,
+                    _options: { 
+                        dialogOptions: "dontDisplay"
+                    }
+                };
+                
+                const basicResult = await batchPlay(
+                    [basicSaveDesc],
+                    {
+                        synchronousExecution: true,
+                        modalBehavior: "none"
+                    }
+                );
+                
+                log(`[DEBUG] ✅ Basic PSD Save completed successfully`);
+                console.log(`[CURSOR SAVE] ✅ Basic PSD Save completed successfully`);
+                return { success: true, method: "basicSave", result: basicResult };
+            } catch (basicError) {
+                log(`[DEBUG] All PSD save methods failed`);
+                console.log(`[CURSOR SAVE] ❌ All PSD save methods failed`);
+                log(`[DEBUG] Error details: ${JSON.stringify(basicError)}`);
+                throw new PluginError(
+                    'Failed to save PSD (all methods failed)',
+                    'PSD_SAVE_ERROR',
+                    { 
+                        directFsError: directFsError?.message,
+                        fileObjError: fileObjError?.message,
+                        standardError: error.message, 
+                        basicError: basicError.message,
+                        outputPath 
+                    }
+                );
+            }
+        }
+    } catch (error) {
+        log(`[DEBUG] PSD Save Failed with critical error: ${error.message}`);
+        console.log(`[CURSOR SAVE] ❌ PSD Save Failed with critical error: ${error.message}`);
+        log(`[DEBUG] Stack trace: ${error.stack}`);
+        throw error;
+    }
+}
+
 // Add a global processing control variable
 let isProcessingStopped = false;
 
@@ -2714,7 +3428,8 @@ async function processTextReplacement() {
                     totalRows: textReplaceState.data.csvData.length,
                     processedRows: textReplaceState.status.performance.processedRows,
                     outputFolders: {
-                        png: folders.pngNativePath
+                        png: folders.pngFolder.nativePath,
+                        psd: folders.psdFolder.nativePath
                     }
                 },
                 timestamp: new Date().toISOString()
@@ -2723,6 +3438,7 @@ async function processTextReplacement() {
             log('[Cursor OK] Text replacement completed');
             log(`[Cursor OK] Files saved to:`);
             log(`  PNG folder: ${folders.pngNativePath}`);
+            log(`  PSD folder: ${folders.psdNativePath}`);
             
         } catch (error) {
             console.error("[DEBUG] Text replacement error:", error);
@@ -2922,7 +3638,8 @@ document.getElementById('selectOutputFolder').addEventListener('click', async ()
             
             textReplaceState.status.steps.outputFolderSelected = true;
             log(`[Cursor OK] Text output folders created:`);
-            log(`  PNG: ${folders.pngNativePath}`);
+            log(`  PNG: ${folders.pngFolder.nativePath}`);
+            log(`  PSD: ${folders.psdFolder.nativePath}`);
             
             document.getElementById('textStatus').textContent = `Output folders ready: ${textReplaceState.data.outputFolder.nativePath}`;
         }
@@ -3143,8 +3860,8 @@ async function processCSV(csvData) {
                     
                     // Check if files were saved
                     const filesSaved = result.filesSaved || {};
-                    if (filesSaved.png) {
-                        savedFileCount += (filesSaved.png ? 1 : 0);
+                    if (filesSaved.png || filesSaved.psd) {
+                        savedFileCount += (filesSaved.png ? 1 : 0) + (filesSaved.psd ? 1 : 0);
                     }
                 }
                 
@@ -3189,8 +3906,8 @@ async function processCSV(csvData) {
                         
                         // Check if files were saved
                         const filesSaved = result.filesSaved || {};
-                        if (filesSaved.png) {
-                            savedFileCount += (filesSaved.png ? 1 : 0);
+                        if (filesSaved.png || filesSaved.psd) {
+                            savedFileCount += (filesSaved.png ? 1 : 0) + (filesSaved.psd ? 1 : 0);
                         }
                     }
                     
@@ -3252,6 +3969,7 @@ async function processCSV(csvData) {
         // Show output folder paths
         log(`[DEBUG] Files saved to:`);
         log(`[DEBUG] - PNG: ${folders.pngNativePath}`);
+        log(`[DEBUG] - PSD: ${folders.psdNativePath}`);
         
         // Write final status to MCP relay
         try {
