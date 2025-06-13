@@ -735,122 +735,122 @@ async function replaceImage(layer, imagePath) {
 }
 
 // Enhanced folder setup with verification and conditional creation
-async function setupTextOutputFolders() {
-    log('[DEBUG] Setting up text output folders');
-    
+async function setupTextOutputFolders(outputFolder) {
     try {
-        const fs = require('uxp').storage.localFileSystem;
-        
-        // Get desktop folder as base location
-        const desktop = await fs.getFolder(fs.domains.userDesktop);
-        log(`[DEBUG] Got desktop folder: ${desktop.nativePath}`);
-        
-        // Create main output folder
-        let mainFolder;
-        try {
-            mainFolder = await desktop.getEntry('SaveOnPeptides_Output');
-            log(`[DEBUG] Found existing main output folder: ${mainFolder.nativePath}`);
-        } catch (e) {
-            log(`[DEBUG] Creating main output folder on desktop`);
-            mainFolder = await desktop.createFolder('SaveOnPeptides_Output');
-            log(`[DEBUG] Created main output folder: ${mainFolder.nativePath}`);
+        if (!outputFolder) {
+            throw new PluginError('Output folder not selected', 'FOLDER_NOT_SELECTED');
         }
+
+        console.log("[DEBUG] Checking output folders in:", outputFolder.nativePath);
+        const folders = {};
         
-        // Create timestamped subfolder for this session
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-        const sessionFolderName = `Session_${timestamp}`;
+        // Store the base output folder
+        folders.baseFolder = outputFolder;
         
-        let sessionFolder;
+        // Check PNG folder, create if not exists
         try {
-            sessionFolder = await mainFolder.getEntry(sessionFolderName);
-            log(`[DEBUG] Found existing session folder: ${sessionFolder.nativePath}`);
-        } catch (e) {
-            log(`[DEBUG] Creating new session folder: ${sessionFolderName}`);
-            sessionFolder = await mainFolder.createFolder(sessionFolderName);
-            log(`[DEBUG] Created session folder: ${sessionFolder.nativePath}`);
-        }
-        
-        // Create PNG output folder
-        let pngFolder;
-        try {
-            pngFolder = await sessionFolder.getEntry('PNG_Output');
-            log(`[DEBUG] Found existing PNG output folder: ${pngFolder.nativePath}`);
-        } catch (e) {
-            log(`[DEBUG] Creating PNG output folder`);
-            pngFolder = await sessionFolder.createFolder('PNG_Output');
-            log(`[DEBUG] Created PNG output folder: ${pngFolder.nativePath}`);
-        }
-        
-        // Create PSD output folder
-        let psdFolder;
-        try {
-            psdFolder = await sessionFolder.getEntry('PSD_Output');
-            log(`[DEBUG] Found existing PSD output folder: ${psdFolder.nativePath}`);
-        } catch (e) {
-            log(`[DEBUG] Creating PSD output folder`);
-            psdFolder = await sessionFolder.createFolder('PSD_Output');
-            log(`[DEBUG] Created PSD output folder: ${psdFolder.nativePath}`);
-        }
-        
-        // Create MCP relay folder for external monitoring
-        let mcpFolder;
-        try {
-            mcpFolder = await sessionFolder.getEntry('MCP_Relay');
-            log(`[DEBUG] Found existing MCP relay folder: ${mcpFolder.nativePath}`);
-        } catch (e) {
-            log(`[DEBUG] Creating MCP relay folder`);
-            mcpFolder = await sessionFolder.createFolder('MCP_Relay');
-            log(`[DEBUG] Created MCP relay folder: ${mcpFolder.nativePath}`);
-        }
-        
-        // Verify folder permissions by writing test files
-        try {
-            log(`[DEBUG] Verifying folder write permissions with test files`);
+            console.log("[DEBUG] Checking Text_PNG folder...");
+            try {
+                folders.pngFolder = await outputFolder.getEntry('Text_PNG');
+                if (!folders.pngFolder.isFolder) {
+                    throw new Error('Text_PNG exists but is not a folder');
+                }
+                console.log("[DEBUG] Found existing Text_PNG folder:", folders.pngFolder.nativePath);
+            } catch (notFoundError) {
+                // If the folder doesn't exist, create it
+                console.log("[DEBUG] Text_PNG folder not found, creating new one...");
+                folders.pngFolder = await outputFolder.createEntry('Text_PNG', { type: 'folder' });
+                console.log("[DEBUG] Created new Text_PNG folder:", folders.pngFolder.nativePath);
+            }
             
-            // Test PNG folder
-            const pngTestFile = await pngFolder.createFile('test.txt', { overwrite: true });
-            await pngTestFile.write('test');
-            await pngTestFile.delete();
-            log(`[DEBUG] ✅ PNG folder write test passed`);
-            
-            // Test PSD folder
-            const psdTestFile = await psdFolder.createFile('test.txt', { overwrite: true });
-            await psdTestFile.write('test');
-            await psdTestFile.delete();
-            log(`[DEBUG] ✅ PSD folder write test passed`);
-            
-            // Test MCP folder
-            const mcpTestFile = await mcpFolder.createFile('test.txt', { overwrite: true });
-            await mcpTestFile.write('test');
-            await mcpTestFile.delete();
-            log(`[DEBUG] ✅ MCP folder write test passed`);
-        } catch (testError) {
-            log(`[DEBUG] ❌ Folder permission test failed: ${testError.message}`);
-            // Continue anyway, we'll handle errors during actual file operations
+            // Verify the folder was created
+            if (!folders.pngFolder || !folders.pngFolder.isFolder) {
+                throw new PluginError('Failed to create PNG folder', 'FOLDER_CREATE_ERROR');
+            }
+        } catch (error) {
+            console.error("[DEBUG] Error with PNG folder:", error);
+            throw new PluginError(
+                'Failed to create Text_PNG folder',
+                'FOLDER_CREATE_ERROR',
+                { path: 'Text_PNG', error }
+            );
         }
         
-        // Store native paths for easier access
-        const pngNativePath = pngFolder.nativePath;
-        const psdNativePath = psdFolder.nativePath;
-        const mcpNativePath = mcpFolder.nativePath;
+        // Check PSD folder, create if not exists
+        try {
+            console.log("[DEBUG] Checking Text_PSD folder...");
+            try {
+                folders.psdFolder = await outputFolder.getEntry('Text_PSD');
+                if (!folders.psdFolder.isFolder) {
+                    throw new Error('Text_PSD exists but is not a folder');
+                }
+                console.log("[DEBUG] Found existing Text_PSD folder:", folders.psdFolder.nativePath);
+            } catch (notFoundError) {
+                // If the folder doesn't exist, create it
+                console.log("[DEBUG] Text_PSD folder not found, creating new one...");
+                folders.psdFolder = await outputFolder.createEntry('Text_PSD', { type: 'folder' });
+                console.log("[DEBUG] Created new Text_PSD folder:", folders.psdFolder.nativePath);
+            }
+            
+            // Verify the folder was created
+            if (!folders.psdFolder || !folders.psdFolder.isFolder) {
+                throw new PluginError('Failed to create PSD folder', 'FOLDER_CREATE_ERROR');
+            }
+        } catch (error) {
+            console.error("[DEBUG] Error with PSD folder:", error);
+            throw new PluginError(
+                'Failed to create Text_PSD folder',
+                'FOLDER_CREATE_ERROR',
+                { path: 'Text_PSD', error }
+            );
+        }
+
+        // Verify both folders are accessible
+        try {
+            const pngExists = await folders.pngFolder.isEntry;
+            const psdExists = await folders.psdFolder.isEntry;
+            
+            if (!pngExists || !psdExists) {
+                throw new PluginError(
+                    'Could not verify folder access', 
+                    'FOLDER_ACCESS_ERROR',
+                    {
+                        pngExists,
+                        psdExists,
+                        pngPath: folders.pngFolder?.nativePath,
+                        psdPath: folders.psdFolder?.nativePath
+                    }
+                );
+            }
+        } catch (verifyError) {
+            console.error("[DEBUG] Folder verification failed:", verifyError);
+            throw new PluginError(
+                'Failed to verify folder access', 
+                'FOLDER_VERIFY_ERROR',
+                { error: verifyError }
+            );
+        }
         
-        // Log the paths in a format suitable for M1 Mac
-        log(`[DEBUG] Output folders setup complete:`);
-        log(`[DEBUG] - PNG output: ${pngNativePath.replace(/\\/g, '/')}`);
-        log(`[DEBUG] - PSD output: ${psdNativePath.replace(/\\/g, '/')}`);
-        log(`[DEBUG] - MCP relay: ${mcpNativePath.replace(/\\/g, '/')}`);
+        // Ensure native paths are properly formatted for M1 Macs
+        folders.pngNativePath = folders.pngFolder.nativePath.replace(/\\/g, '/');
+        folders.psdNativePath = folders.psdFolder.nativePath.replace(/\\/g, '/');
+
+        console.log("[DEBUG] Output folders ready:", {
+            png: folders.pngNativePath,
+            psd: folders.psdNativePath
+        });
         
-        return {
-            pngFolder,
-            psdFolder,
-            mcpFolder,
-            pngNativePath: pngNativePath.replace(/\\/g, '/'),
-            psdNativePath: psdNativePath.replace(/\\/g, '/'),
-            mcpNativePath: mcpNativePath.replace(/\\/g, '/')
-        };
+        return folders;
     } catch (error) {
-        log(`[DEBUG] ❌ Failed to setup output folders: ${error.message}`);
-        throw new PluginError('Failed to setup output folders', 'FOLDER_SETUP_ERROR', error);
+        console.error("[DEBUG] Folder setup failed:", error);
+        throw new PluginError(
+            'Failed to setup output folders', 
+            'FOLDER_SETUP_ERROR', 
+            { 
+                error,
+                outputPath: outputFolder?.nativePath 
+            }
+        );
     }
 }
 
@@ -2011,7 +2011,7 @@ async function processTextReplacement() {
         // Setup output folders using text-specific function
         let folders;
         try {
-            folders = await setupTextOutputFolders();
+            folders = await setupTextOutputFolders(textReplaceState.data.outputFolder);
         } catch (folderError) {
             console.error("[DEBUG] Folder setup failed:", folderError);
             throw new PluginError(
@@ -2309,7 +2309,7 @@ document.getElementById('selectOutputFolder').addEventListener('click', async ()
             console.log("[DEBUG] Setting up output folders in:", textReplaceState.data.outputFolder.nativePath);
             
             // Immediately try to setup the folders
-            const folders = await setupTextOutputFolders();
+            const folders = await setupTextOutputFolders(textReplaceState.data.outputFolder);
             
             textReplaceState.status.steps.outputFolderSelected = true;
             log(`[Cursor OK] Text output folders created:`);
@@ -2484,6 +2484,8 @@ async function processCSV(csvData) {
         
         // Update UI to show processing started
         const statusElement = document.getElementById('textStatus');
+        const progressElement = document.getElementById('processingProgress');
+        
         if (statusElement) {
             statusElement.textContent = 'Processing...';
             statusElement.style.color = '#4CAF50';
@@ -2494,36 +2496,38 @@ async function processCSV(csvData) {
         if (stopButton) {
             stopButton.style.display = 'block';
             stopButton.disabled = false;
-            stopButton.textContent = 'Stop Processing';
         }
         
         // Setup output folders
-        const folders = await setupTextOutputFolders();
+        const folders = await setupTextOutputFolders(textReplaceState.data.outputFolder);
         log(`[DEBUG] Output folders setup complete`);
         
-        // Process each row
+        // Get processing type
+        const processType = document.querySelector('input[name="processType"]:checked').value;
+        
+        // Process rows based on selection
         const results = [];
         let processedCount = 0;
         let errorCount = 0;
         let savedFileCount = 0;
         
-        for (let i = 0; i < csvData.length; i++) {
-            // Check if processing should stop
-            if (shouldStopProcessing()) {
-                log(`[DEBUG] Processing stopped by user after ${processedCount} rows`);
-                break;
+        if (processType === 'current') {
+            // Process only the current row
+            const currentRow = textReplaceState.data.currentRow;
+            if (!currentRow) {
+                throw new PluginError('No current row selected', 'NO_CURRENT_ROW');
             }
             
-            const row = csvData[i];
+            const rowIndex = textReplaceState.data.currentRowIndex;
             
             try {
                 // Update UI with current progress
-                if (statusElement) {
-                    statusElement.textContent = `Processing row ${i + 1} of ${csvData.length}...`;
+                if (progressElement) {
+                    progressElement.textContent = `Processing row ${rowIndex + 1}...`;
                 }
                 
-                log(`[DEBUG] Processing row ${i + 1} of ${csvData.length}`);
-                const result = await processTextRow(row, i + 1, csvData.length, folders);
+                log(`[DEBUG] Processing single row ${rowIndex + 1}`);
+                const result = await processTextRow(currentRow, rowIndex + 1, 1, folders);
                 
                 // Track successful saves
                 if (result.success) {
@@ -2542,21 +2546,68 @@ async function processCSV(csvData) {
                 }
                 
                 results.push(result);
-                
-                // Pause briefly to allow UI updates and prevent freezing
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
             } catch (rowError) {
-                log(`[DEBUG] Error processing row ${i + 1}: ${rowError.message}`);
+                log(`[DEBUG] Error processing row ${rowIndex + 1}: ${rowError.message}`);
                 errorCount++;
                 results.push({
                     success: false,
                     error: rowError.message,
-                    rowIndex: i + 1
+                    rowIndex: rowIndex + 1
                 });
+            }
+        } else {
+            // Process all rows
+            for (let i = 0; i < csvData.length; i++) {
+                // Check if processing should stop
+                if (shouldStopProcessing()) {
+                    log(`[DEBUG] Processing stopped by user after ${processedCount} rows`);
+                    break;
+                }
                 
-                // Continue with next row instead of stopping the whole process
-                continue;
+                const row = csvData[i];
+                
+                try {
+                    // Update UI with current progress
+                    if (progressElement) {
+                        progressElement.textContent = `Processing row ${i + 1} of ${csvData.length}...`;
+                    }
+                    
+                    log(`[DEBUG] Processing row ${i + 1} of ${csvData.length}`);
+                    const result = await processTextRow(row, i + 1, csvData.length, folders);
+                    
+                    // Track successful saves
+                    if (result.success) {
+                        processedCount++;
+                        
+                        // Check if files were saved
+                        const filesSaved = result.filesSaved || {};
+                        if (filesSaved.png || filesSaved.psd) {
+                            savedFileCount += (filesSaved.png ? 1 : 0) + (filesSaved.psd ? 1 : 0);
+                        }
+                    }
+                    
+                    // Track errors
+                    if (result.errors && result.errors.length > 0) {
+                        errorCount += result.errors.length;
+                    }
+                    
+                    results.push(result);
+                    
+                    // Pause briefly to allow UI updates and prevent freezing
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                } catch (rowError) {
+                    log(`[DEBUG] Error processing row ${i + 1}: ${rowError.message}`);
+                    errorCount++;
+                    results.push({
+                        success: false,
+                        error: rowError.message,
+                        rowIndex: i + 1
+                    });
+                    
+                    // Continue with next row instead of stopping the whole process
+                    continue;
+                }
             }
         }
         
@@ -2577,6 +2628,11 @@ async function processCSV(csvData) {
                 statusElement.textContent = `Completed: ${processedCount} rows processed, ${savedFileCount} files saved`;
                 statusElement.style.color = '#4CAF50';
             }
+        }
+        
+        // Clear progress
+        if (progressElement) {
+            progressElement.textContent = '';
         }
         
         // Log completion statistics

@@ -58,93 +58,88 @@ h2 {
 }
 
 .label {
-    margin-bottom: 8px;
-    font-size: 14px;
     color: #cccccc;
+    margin-bottom: 12px;
+    font-size: 14px;
 }
 
 .primary-button {
     background-color: #4CAF50;
     color: white;
     border: none;
-    padding: 8px 16px;
+    padding: 12px 24px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 14px;
+    margin-bottom: 16px;
+    width: 100%;
+    max-width: 300px;
 }
 
 .primary-button:hover {
     background-color: #45a049;
 }
 
-.primary-button:disabled {
-    background-color: #555555;
-    cursor: not-allowed;
-}
-
-.secondary-button {
-    background-color: #555555;
+.stop-button {
+    background-color: #e74c3c;
     color: white;
     border: none;
-    padding: 8px 16px;
+    padding: 12px 24px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 14px;
+    margin-bottom: 16px;
+    width: 100%;
+    max-width: 300px;
 }
 
-.secondary-button:hover {
-    background-color: #666666;
+.stop-button:hover {
+    background-color: #c0392b;
 }
 
-.warning-button {
-    background-color: #ff9800;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    margin-top: 8px;
-}
-
-.warning-button:hover {
-    background-color: #e68a00;
-}
-
-.warning-button:disabled {
-    background-color: #555555;
+.stop-button:disabled {
+    background-color: #95a5a6;
     cursor: not-allowed;
 }
 
-.status {
-    font-size: 14px;
-    padding: 8px;
-    background-color: #444444;
-    border-radius: 4px;
-    margin-top: 4px;
-}
-
-.filename {
-    font-size: 14px;
-    color: #cccccc;
-    margin-left: 8px;
-    font-style: italic;
-}
-
-.log-container {
-    background-color: #222222;
-    border-radius: 4px;
-    padding: 8px;
-    height: 300px;
-    overflow-y: auto;
+.radio-group {
     margin-bottom: 16px;
 }
 
-.log-content {
+.radio {
+    display: block;
+    margin-bottom: 12px;
+    color: #ffffff;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.radio input[type="radio"] {
+    margin-right: 8px;
+}
+
+.status {
+    color: #cccccc;
+    font-size: 14px;
+    min-height: 20px;
+}
+
+.progress-status {
+    color: #4CAF50;
+    font-weight: bold;
+}
+
+.log-container {
+    background: #1e1e1e;
+    padding: 16px;
+    border-radius: 4px;
     font-family: monospace;
     font-size: 12px;
     color: #cccccc;
+    height: 200px;
+    overflow-y: auto;
     white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 /* Scrollbar styling */
