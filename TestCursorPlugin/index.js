@@ -1722,10 +1722,16 @@ async function processImageRow(row, index, total) {
     }
 }
 
-// Update processTextReplacement to pass folders to processTextRow
+// Add a global processing control variable
+let isProcessingStopped = false;
+
+// Update the processTextReplacement function to check for stop flag
 async function processTextReplacement() {
     const textStatus = document.getElementById('textStatus');
     const processType = document.querySelector('input[name="processType"]:checked')?.value;
+    
+    // Reset the stop flag when starting a new process
+    isProcessingStopped = false;
     
     if (!processType) {
         log('[Cursor OK] Process type not selected');
@@ -1779,34 +1785,62 @@ async function processTextReplacement() {
         const startTime = Date.now();
         
         try {
+            // Update UI to show stop button
+            const processButton = document.getElementById('processText');
+            if (processButton) {
+                processButton.textContent = 'Stop Processing';
+                processButton.classList.add('stop-button');
+                // Change the button to a stop button
+                processButton.onclick = () => {
+                    isProcessingStopped = true;
+                    textStatus.textContent = 'Stopping processing...';
+                    log('[DEBUG] Processing stop requested by user');
+                    processButton.disabled = true;
+                };
+            }
+            
+            // Process single row or all rows
             if (processType === 'current') {
-                const currentRow = textReplaceState.data.csvData[0];
-                if (!currentRow) {
-                    throw new PluginError('No data in first row', 'EMPTY_ROW');
+                const currentRowIndex = textReplaceState.status.performance.processedRows || 0;
+                if (currentRowIndex < textReplaceState.data.csvData.length) {
+                    const row = textReplaceState.data.csvData[currentRowIndex];
+                    textStatus.textContent = `Processing row ${currentRowIndex + 1}/${textReplaceState.data.csvData.length}...`;
+                    await processTextRow(row, currentRowIndex, textReplaceState.data.csvData.length, folders);
+                    textStatus.textContent = `Processed row ${currentRowIndex + 1}/${textReplaceState.data.csvData.length}`;
+                } else {
+                    textStatus.textContent = 'No more rows to process';
                 }
-                
-                await processTextRow(currentRow, 0, 1, folders);
-                textStatus.textContent = 'Current row processed successfully';
-                
             } else {
-                const total = textReplaceState.data.csvData.length;
-                log("[DEBUG] Starting batch processing:", {
-                    totalRows: total,
-                    timestamp: new Date().toISOString()
-                });
-                
-                for (let i = 0; i < total; i++) {
-                    const row = textReplaceState.data.csvData[i];
-                    if (!row) {
-                        throw new PluginError(`Empty row at index ${i}`, 'EMPTY_ROW');
+                // Process all rows with stop check
+                const startIndex = textReplaceState.status.performance.processedRows || 0;
+                for (let i = startIndex; i < textReplaceState.data.csvData.length; i++) {
+                    // Check if processing should stop
+                    if (isProcessingStopped) {
+                        textStatus.textContent = 'Processing stopped by user';
+                        log('[DEBUG] Processing stopped by user request');
+                        break;
                     }
                     
-                    textStatus.textContent = `Processing row ${i + 1} of ${total}...`;
-                    await processTextRow(row, i, total, folders);
+                    const row = textReplaceState.data.csvData[i];
+                    textStatus.textContent = `Processing row ${i + 1}/${textReplaceState.data.csvData.length}...`;
+                    await processTextRow(row, i, textReplaceState.data.csvData.length, folders);
+                    textReplaceState.status.performance.processedRows = i + 1;
                 }
-                textStatus.textContent = 'All rows processed successfully';
+                
+                if (!isProcessingStopped) {
+                    textStatus.textContent = 'All rows processed';
+                }
             }
-
+            
+            // Reset the button
+            if (processButton) {
+                processButton.textContent = 'Process CSV';
+                processButton.classList.remove('stop-button');
+                processButton.disabled = false;
+                // Restore original click handler
+                processButton.onclick = processTextReplacement;
+            }
+            
             const duration = Date.now() - startTime;
             
             await writeToMCPRelay({
@@ -1836,6 +1870,18 @@ async function processTextReplacement() {
     } catch (error) {
         console.error("[DEBUG] Text replacement error:", error);
         throw error;
+    } finally {
+        // Always reset the button state
+        const processButton = document.getElementById('processText');
+        if (processButton) {
+            processButton.textContent = 'Process CSV';
+            processButton.classList.remove('stop-button');
+            processButton.disabled = false;
+            // Restore original click handler
+            processButton.onclick = processTextReplacement;
+        }
+        
+        textReplaceState.status.isProcessing = false;
     }
 }
 
@@ -1843,6 +1889,9 @@ async function processTextReplacement() {
 async function processImageReplacement() {
     const imageStatus = document.getElementById('imageStatus');
     const processType = document.querySelector('input[name="processTypeImg"]:checked')?.value;
+    
+    // Reset the stop flag when starting a new process
+    isProcessingStopped = false;
     
     try {
         // Validate state
@@ -1869,17 +1918,62 @@ async function processImageReplacement() {
         
         imageStatus.textContent = 'Processing...';
 
-        if (processType === 'current') {
-            const currentRow = imageReplaceState.data.csvData[0];
-            await processImageRow(currentRow);
-            imageStatus.textContent = 'Current row processed successfully';
-        } else {
-            for (const row of imageReplaceState.data.csvData) {
-                await processImageRow(row);
-            }
-            imageStatus.textContent = 'All rows processed successfully';
+        // Update UI to show stop button
+        const processButton = document.getElementById('processImages');
+        if (processButton) {
+            processButton.textContent = 'Stop Processing';
+            processButton.classList.add('stop-button');
+            // Change the button to a stop button
+            processButton.onclick = () => {
+                isProcessingStopped = true;
+                imageStatus.textContent = 'Stopping processing...';
+                log('[DEBUG] Processing stop requested by user');
+                processButton.disabled = true;
+            };
         }
-
+        
+        // Process single row or all rows
+        if (processType === 'current') {
+            const currentRowIndex = imageReplaceState.status.performance.processedRows || 0;
+            if (currentRowIndex < imageReplaceState.data.csvData.length) {
+                const row = imageReplaceState.data.csvData[currentRowIndex];
+                imageStatus.textContent = `Processing row ${currentRowIndex + 1}/${imageReplaceState.data.csvData.length}...`;
+                await processImageRow(row, currentRowIndex, imageReplaceState.data.csvData.length);
+                imageStatus.textContent = `Processed row ${currentRowIndex + 1}/${imageReplaceState.data.csvData.length}`;
+            } else {
+                imageStatus.textContent = 'No more rows to process';
+            }
+        } else {
+            // Process all rows with stop check
+            const startIndex = imageReplaceState.status.performance.processedRows || 0;
+            for (let i = startIndex; i < imageReplaceState.data.csvData.length; i++) {
+                // Check if processing should stop
+                if (isProcessingStopped) {
+                    imageStatus.textContent = 'Processing stopped by user';
+                    log('[DEBUG] Processing stopped by user request');
+                    break;
+                }
+                
+                const row = imageReplaceState.data.csvData[i];
+                imageStatus.textContent = `Processing row ${i + 1}/${imageReplaceState.data.csvData.length}...`;
+                await processImageRow(row, i, imageReplaceState.data.csvData.length);
+                imageReplaceState.status.performance.processedRows = i + 1;
+            }
+            
+            if (!isProcessingStopped) {
+                imageStatus.textContent = 'All rows processed';
+            }
+        }
+        
+        // Reset the button
+        if (processButton) {
+            processButton.textContent = 'Process CSV';
+            processButton.classList.remove('stop-button');
+            processButton.disabled = false;
+            // Restore original click handler
+            processButton.onclick = processImageReplacement;
+        }
+        
         // Write to MCP relay
         await writeToMCPRelay({
             command: "sendLog",
@@ -1891,8 +1985,17 @@ async function processImageReplacement() {
     } catch (error) {
         await handleError(error, 'image');
     } finally {
+        // Always reset the button state
+        const processButton = document.getElementById('processImages');
+        if (processButton) {
+            processButton.textContent = 'Process CSV';
+            processButton.classList.remove('stop-button');
+            processButton.disabled = false;
+            // Restore original click handler
+            processButton.onclick = processImageReplacement;
+        }
+        
         imageReplaceState.status.isProcessing = false;
-        imageReplaceState.status.currentOperation = null;
     }
 }
 
@@ -2088,4 +2191,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }).catch(error => {
         log(`[Cursor OK] MCP relay write failed: ${error.message}`);
     });
+
+    // Add CSS for the stop button
+    const style = document.createElement('style');
+    style.textContent = `
+        .stop-button {
+            background-color: #d9534f !important;
+            color: white !important;
+        }
+    `;
+    document.head.appendChild(style);
 });
