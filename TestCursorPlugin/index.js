@@ -2253,6 +2253,42 @@ function resetStopProcessing() {
     return true;
 }
 
+// Test function for isolated PNG save testing
+async function runSingleSaveTest() {
+    log("Running single save test...");
+    
+    try {
+        // Get the activeDocument and outputFolder from textReplaceState
+        const doc = app.activeDocument;
+        const outputFolder = textReplaceState.data.outputFolder;
+        
+        // Check if both document and folder exist
+        if (!doc) {
+            log("❌ Error: No active document found");
+            return;
+        }
+        
+        if (!outputFolder) {
+            log("❌ Error: No output folder selected");
+            return;
+        }
+        
+        // Setup output folders to get the PNG folder
+        const folders = await setupTextOutputFolders(outputFolder);
+        
+        // Call the existing saveAsPNG function with hardcoded filename
+        log("📁 Attempting to save test-output.png...");
+        const testPath = `${folders.pngNativePath}/test-output.png`;
+        await saveAsPNG(doc, testPath);
+        
+        log("✅ Test save completed (check if file actually exists)");
+        
+    } catch (error) {
+        log(`❌ Test save failed: ${error.message}`);
+        console.error("Test save error:", error);
+    }
+}
+
 // Update the processTextReplacement function to check for stop requests
 async function processTextReplacement() {
     const textStatus = document.getElementById('textStatus');
@@ -2511,6 +2547,9 @@ document.getElementById('selectOutputFolder').addEventListener('click', async ()
 
 // Process button event listeners
 document.getElementById('processText').addEventListener('click', processTextReplacement);
+
+// Test Save button event listener
+document.getElementById('testSaveBtn').addEventListener('click', runSingleSaveTest);
 
 // Restart Plugin button event listener
 document.getElementById('restartPlugin').addEventListener('click', async () => {
