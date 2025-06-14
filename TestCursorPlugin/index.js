@@ -51,6 +51,51 @@ const createPluginState = () => ({
 // Separate state per tab with enhanced structure
 const textReplaceState = createPluginState();
 
+// Add a global stop processing flag
+let stopProcessingRequested = false;
+
+// Function to check if processing should stop
+function shouldStopProcessing() {
+    return stopProcessingRequested;
+}
+
+// Function to request stopping the processing
+function requestStopProcessing() {
+    stopProcessingRequested = true;
+    log("[DEBUG] Stop processing requested by user");
+    
+    // Update UI to show stopping
+    const statusElement = document.getElementById('textStatus');
+    if (statusElement) {
+        statusElement.textContent = 'Stopping...';
+        statusElement.style.color = 'orange';
+    }
+    
+    // Update stop button
+    const stopButton = document.getElementById('stopProcessingBtn');
+    if (stopButton) {
+        stopButton.disabled = true;
+        stopButton.textContent = 'Stopping...';
+    }
+    
+    return true;
+}
+
+// Function to reset stop processing flag
+function resetStopProcessing() {
+    stopProcessingRequested = false;
+    
+    // Update UI elements
+    const stopButton = document.getElementById('stopProcessingBtn');
+    if (stopButton) {
+        stopButton.disabled = false;
+        stopButton.textContent = 'Stop Processing';
+        stopButton.style.display = 'none';
+    }
+    
+    return true;
+}
+
 // Enhanced error handling
 class PluginError extends Error {
     constructor(message, code, details = {}) {
@@ -2671,6 +2716,172 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Other existing event listeners
 });
+
+// Main text replacement processing function
+async function processTextReplacement() {
+    const textStatus = document.getElementById('textStatus');
+    const processType = document.querySelector('input[name="processType"]:checked')?.value;
+    
+    // Reset the stop flag when starting a new process
+    resetStopProcessing();
+    
+    if (!processType) {
+        log('[Cursor OK] Process type not selected');
+        return;
+    }
+    
+    try {
+        // Validate state with detailed errors
+        if (!textReplaceState.data.csvData || !textReplaceState.data.csvData.length) {
+            throw new PluginError('No CSV data available', 'CSV_NOT_LOADED');
+        }
+
+        if (!textReplaceState.data.outputFolder) {
+            throw new PluginError('Output folder not selected', 'FOLDER_NOT_SELECTED');
+        }
+
+        const doc = app.activeDocument;
+        if (!doc) {
+            throw new PluginError('No active document found', 'NO_DOCUMENT');
+        }
+        
+        // Initialize document once at the start
+        textStatus.textContent = 'Initializing document...';
+        try {
+            await ensureDocumentInitialized();
+            log('[DEBUG] Document initialized successfully');
+        } catch (initError) {
+            log(`[DEBUG] Document initialization failed: ${initError.message}`);
+            throw initError;
+        }
+
+        // Update state and UI
+        textReplaceState.status.isProcessing = true;
+        textReplaceState.status.currentOperation = 'text_replacement';
+        textStatus.textContent = 'Setting up output folders...';
+        
+        // Show stop button
+        const stopButton = document.getElementById('stopProcessingBtn');
+        if (stopButton) {
+            stopButton.style.display = 'block';
+        }
+        
+        // Setup output folders using text-specific function
+        let folders;
+        try {
+            folders = await setupTextOutputFolders(textReplaceState.data.outputFolder);
+        } catch (folderError) {
+            console.error("[DEBUG] Folder setup failed:", folderError);
+            throw new PluginError(
+                'Failed to setup output folders',
+                'FOLDER_SETUP_FAILED',
+                { originalError: folderError }
+            );
+        }
+        
+        textStatus.textContent = 'Processing...';
+        const startTime = Date.now();
+        
+        try {
+            // Process single row or all rows
+            if (processType === 'current') {
+                const currentRowIndex = textReplaceState.status.performance.processedRows || 0;
+                if (currentRowIndex < textReplaceState.data.csvData.length) {
+                    const row = textReplaceState.data.csvData[currentRowIndex];
+                    textStatus.textContent = `Processing row ${currentRowIndex + 1}/${textReplaceState.data.csvData.length}...`;
+                    const progressElement = document.getElementById('processingProgress');
+                    if (progressElement) {
+                        progressElement.textContent = `Processing row ${currentRowIndex + 1} of ${textReplaceState.data.csvData.length}`;
+                    }
+                    await processTextRow(row, currentRowIndex, textReplaceState.data.csvData.length, folders);
+                    
+                    // Update processed rows counter for "current" mode
+                    textReplaceState.status.performance.processedRows = currentRowIndex + 1;
+                    
+                    textStatus.textContent = `Processed row ${currentRowIndex + 1}/${textReplaceState.data.csvData.length}`;
+                } else {
+                    textStatus.textContent = 'No more rows to process';
+                }
+            } else {
+                // Process all rows with stop check
+                const startIndex = textReplaceState.status.performance.processedRows || 0;
+                for (let i = startIndex; i < textReplaceState.data.csvData.length; i++) {
+                    // Check if processing should stop
+                    if (shouldStopProcessing()) {
+                        textStatus.textContent = 'Processing stopped by user';
+                        log('[DEBUG] Processing stopped by user request');
+                        break;
+                    }
+                    
+                    const row = textReplaceState.data.csvData[i];
+                    textStatus.textContent = `Processing row ${i + 1}/${textReplaceState.data.csvData.length}...`;
+                    
+                    // Update progress element
+                    const progressElement = document.getElementById('processingProgress');
+                    if (progressElement) {
+                        progressElement.textContent = `Processing row ${i + 1} of ${textReplaceState.data.csvData.length}`;
+                    }
+                    
+                    await processTextRow(row, i, textReplaceState.data.csvData.length, folders);
+                    textReplaceState.status.performance.processedRows = i + 1;
+                }
+                
+                if (!shouldStopProcessing()) {
+                    textStatus.textContent = 'All rows processed';
+                }
+            }
+            
+            // Hide stop button
+            if (stopButton) {
+                stopButton.style.display = 'none';
+            }
+            
+            // Reset stop flag
+            resetStopProcessing();
+            
+            const duration = Date.now() - startTime;
+            
+            await writeToMCPRelay({
+                command: "sendLog",
+                message: `Text replacement completed successfully. Type: ${processType}`,
+                metrics: {
+                    duration,
+                    processType,
+                    totalRows: textReplaceState.data.csvData.length,
+                    processedRows: textReplaceState.status.performance.processedRows,
+                    outputFolders: {
+                        png: folders.pngFolder.nativePath
+                    }
+                },
+                timestamp: new Date().toISOString()
+            });
+
+            log('[Cursor OK] Text replacement completed');
+            log(`[Cursor OK] Files saved to:`);
+            log(`  PNG folder: ${folders.pngNativePath}`);
+            
+        } catch (error) {
+            console.error("[DEBUG] Text replacement error:", error);
+            throw error;
+        }
+    } catch (error) {
+        console.error("[DEBUG] Text replacement error:", error);
+        textStatus.textContent = `Error: ${error.message}`;
+        textStatus.style.color = 'red';
+        throw error;
+    } finally {
+        // Hide stop button
+        const stopButton = document.getElementById('stopProcessingBtn');
+        if (stopButton) {
+            stopButton.style.display = 'none';
+        }
+        
+        // Reset stop flag
+        resetStopProcessing();
+        
+        textReplaceState.status.isProcessing = false;
+    }
+}
 
 async function processCSV(csvData) {
     // Reset stop processing flag at the start of each CSV processing
