@@ -50,7 +50,6 @@ const createPluginState = () => ({
 
 // Separate state per tab with enhanced structure
 const textReplaceState = createPluginState();
-const imageReplaceState = createPluginState();
 
 // Enhanced error handling
 class PluginError extends Error {
@@ -706,33 +705,7 @@ async function processLayer(layer, rowData, layerIndex) {
     }
 }
 
-async function replaceImage(layer, imagePath) {
-    try {
-        const imageFile = await fs.getFileForPath(imagePath);
-        if (!imageFile) {
-            throw new PluginError('Image file not found', 'FILE_NOT_FOUND');
-        }
-        
-        const result = await batchPlay(
-            [
-                {
-                    _obj: "replaceContents",
-                    _target: [{ _ref: "smartObjectLayer", _id: layer._id }],
-                    using: { _ref: "file", _path: imagePath }
-                }
-            ],
-            { synchronousExecution: true }
-        );
-        
-        if (!result || result.length === 0) {
-            throw new PluginError('Failed to replace image', 'BATCHPLAY_ERROR');
-        }
-        
-        return result;
-    } catch (error) {
-        throw new PluginError('Error replacing image', 'IMAGE_REPLACE_ERROR', { error });
-    }
-}
+// Image replacement function removed - plugin now focuses on text only
 
 // Enhanced folder setup with verification and conditional creation
 async function setupTextOutputFolders(outputFolder) {
@@ -978,47 +951,7 @@ async function loadTextCSV(file) {
 }
 
 // Enhanced CSV Loading for Image Replace
-async function loadImageCSV(file) {
-    const startTime = startOperation(imageReplaceState, 'csvLoad');
-    try {
-        const fileContent = await file.read();
-        const lines = fileContent.split('\n');
-        const headers = lines[0].split(',');
-        const data = lines.slice(1).map(line => {
-            const values = line.split(',');
-            return headers.reduce((obj, header, index) => {
-                obj[header.trim()] = values[index]?.trim() || '';
-                return obj;
-            }, {});
-        });
-        
-        // Update state with performance metrics
-        imageReplaceState.data.csvData = data;
-        imageReplaceState.status.steps.csvLoaded = true;
-        imageReplaceState.status.performance.totalRows = data.length;
-        
-        const duration = endOperation(imageReplaceState, 'csvLoad');
-        log(`[Cursor OK] Image CSV loaded successfully (${duration}ms, ${data.length} rows)`);
-        
-        // Write performance data to MCP relay
-        await writeToMCPRelay({
-            command: "sendMetrics",
-            tab: "image",
-            operation: "csvLoad",
-            metrics: {
-                duration,
-                rowCount: data.length,
-                timestamp: new Date().toISOString()
-            }
-        });
-        
-        return data;
-    } catch (error) {
-        imageReplaceState.status.steps.csvLoaded = false;
-        log(`Error loading image CSV: ${error.message}`);
-        throw error;
-    }
-}
+// Image CSV loading function removed - plugin now focuses on text only
 
 // Updated PNG save function with proper API v2 format
 async function saveAsPNG(doc, outputPath) {
@@ -1992,33 +1925,7 @@ async function processLayer(layer, rowData, layerIndex) {
     }
 }
 
-async function replaceImage(layer, imagePath) {
-    try {
-        const imageFile = await fs.getFileForPath(imagePath);
-        if (!imageFile) {
-            throw new PluginError('Image file not found', 'FILE_NOT_FOUND');
-        }
-        
-        const result = await batchPlay(
-            [
-                {
-                    _obj: "replaceContents",
-                    _target: [{ _ref: "smartObjectLayer", _id: layer._id }],
-                    using: { _ref: "file", _path: imagePath }
-                }
-            ],
-            { synchronousExecution: true }
-        );
-        
-        if (!result || result.length === 0) {
-            throw new PluginError('Failed to replace image', 'BATCHPLAY_ERROR');
-        }
-        
-        return result;
-    } catch (error) {
-        throw new PluginError('Error replacing image', 'IMAGE_REPLACE_ERROR', { error });
-    }
-}
+// Second image replacement function removed - plugin now focuses on text only
 
 // Enhanced folder setup with verification and conditional creation
 async function setupTextOutputFolders(outputFolder) {
@@ -2106,28 +2013,7 @@ async function setupTextOutputFolders(outputFolder) {
     }
 }
 
-async function setupImageOutputFolders(outputFolder) {
-    try {
-        if (!outputFolder) {
-            throw new PluginError('Output folder not selected', 'FOLDER_NOT_SELECTED');
-        }
-
-        const folders = {};
-        
-        // Create PNG folder for image operations
-        try {
-            folders.pngFolder = await outputFolder.getEntry('Image_PNG');
-        } catch (error) {
-            folders.pngFolder = await outputFolder.createEntry('Image_PNG', { type: 'folder' });
-        }
-        
-
-        
-        return folders;
-    } catch (error) {
-        throw new PluginError('Failed to setup image output folders', 'IMAGE_FOLDER_SETUP_ERROR', { error });
-    }
-}
+// Image output folder setup removed - plugin now focuses on text only
 
 // Performance tracking utilities
 function startOperation(state, operation) {
@@ -2266,47 +2152,7 @@ async function loadTextCSV(file) {
 }
 
 // Enhanced CSV Loading for Image Replace
-async function loadImageCSV(file) {
-    const startTime = startOperation(imageReplaceState, 'csvLoad');
-    try {
-        const fileContent = await file.read();
-        const lines = fileContent.split('\n');
-        const headers = lines[0].split(',');
-        const data = lines.slice(1).map(line => {
-            const values = line.split(',');
-            return headers.reduce((obj, header, index) => {
-                obj[header.trim()] = values[index]?.trim() || '';
-                return obj;
-            }, {});
-        });
-        
-        // Update state with performance metrics
-        imageReplaceState.data.csvData = data;
-        imageReplaceState.status.steps.csvLoaded = true;
-        imageReplaceState.status.performance.totalRows = data.length;
-        
-        const duration = endOperation(imageReplaceState, 'csvLoad');
-        log(`[Cursor OK] Image CSV loaded successfully (${duration}ms, ${data.length} rows)`);
-        
-        // Write performance data to MCP relay
-        await writeToMCPRelay({
-            command: "sendMetrics",
-            tab: "image",
-            operation: "csvLoad",
-            metrics: {
-                duration,
-                rowCount: data.length,
-                timestamp: new Date().toISOString()
-            }
-        });
-        
-        return data;
-    } catch (error) {
-        imageReplaceState.status.steps.csvLoaded = false;
-        log(`Error loading image CSV: ${error.message}`);
-        throw error;
-    }
-}
+// Second image CSV loading function removed - plugin now focuses on text only
 
 // Updated PNG save function with proper API v2 format
 async function saveAsPNG(doc, outputPath) {
@@ -2791,119 +2637,7 @@ async function processTextReplacement() {
     }
 }
 
-// Update processImageReplacement to use document initialization
-async function processImageReplacement() {
-    const imageStatus = document.getElementById('imageStatus');
-    const processType = document.querySelector('input[name="processTypeImg"]:checked')?.value;
-    
-    // Reset the stop flag when starting a new process
-    isProcessingStopped = false;
-    
-    try {
-        // Validate state
-        if (!imageReplaceState.data.csvData) {
-            throw new PluginError('Please load a CSV file first', 'CSV_NOT_LOADED');
-        }
-
-        if (!imageReplaceState.data.outputFolder) {
-            throw new PluginError('Please select an output folder first', 'FOLDER_NOT_SELECTED');
-        }
-
-        const doc = app.activeDocument;
-        if (!doc) {
-            throw new PluginError('No active document found', 'NO_DOCUMENT');
-        }
-
-        // Update state
-        imageReplaceState.status.isProcessing = true;
-        imageReplaceState.status.currentOperation = 'image_replacement';
-        
-        // Setup output folders using image-specific function
-        imageStatus.textContent = 'Setting up output folders...';
-        const folders = await setupImageOutputFolders(imageReplaceState.data.outputFolder);
-        
-        imageStatus.textContent = 'Processing...';
-
-        // Update UI to show stop button
-        const processButton = document.getElementById('processImages');
-        if (processButton) {
-            processButton.textContent = 'Stop Processing';
-            processButton.classList.add('stop-button');
-            // Change the button to a stop button
-            processButton.onclick = () => {
-                isProcessingStopped = true;
-                imageStatus.textContent = 'Stopping processing...';
-                log('[DEBUG] Processing stop requested by user');
-                processButton.disabled = true;
-            };
-        }
-        
-        // Process single row or all rows
-        if (processType === 'current') {
-            const currentRowIndex = imageReplaceState.status.performance.processedRows || 0;
-            if (currentRowIndex < imageReplaceState.data.csvData.length) {
-                const row = imageReplaceState.data.csvData[currentRowIndex];
-                imageStatus.textContent = `Processing row ${currentRowIndex + 1}/${imageReplaceState.data.csvData.length}...`;
-                await processImageRow(row, currentRowIndex, imageReplaceState.data.csvData.length);
-                imageStatus.textContent = `Processed row ${currentRowIndex + 1}/${imageReplaceState.data.csvData.length}`;
-            } else {
-                imageStatus.textContent = 'No more rows to process';
-            }
-        } else {
-            // Process all rows with stop check
-            const startIndex = imageReplaceState.status.performance.processedRows || 0;
-            for (let i = startIndex; i < imageReplaceState.data.csvData.length; i++) {
-                // Check if processing should stop
-                if (isProcessingStopped) {
-                    imageStatus.textContent = 'Processing stopped by user';
-                    log('[DEBUG] Processing stopped by user request');
-                    break;
-                }
-                
-                const row = imageReplaceState.data.csvData[i];
-                imageStatus.textContent = `Processing row ${i + 1}/${imageReplaceState.data.csvData.length}...`;
-                await processImageRow(row, i, imageReplaceState.data.csvData.length);
-                imageReplaceState.status.performance.processedRows = i + 1;
-            }
-            
-            if (!isProcessingStopped) {
-                imageStatus.textContent = 'All rows processed';
-            }
-        }
-        
-        // Reset the button
-        if (processButton) {
-            processButton.textContent = 'Process CSV';
-            processButton.classList.remove('stop-button');
-            processButton.disabled = false;
-            // Restore original click handler
-            processButton.onclick = processImageReplacement;
-        }
-        
-        // Write to MCP relay
-        await writeToMCPRelay({
-            command: "sendLog",
-            message: `Image replacement completed. Type: ${processType}`,
-            timestamp: new Date().toISOString()
-        });
-
-        log('[Cursor OK] Image replacement completed');
-    } catch (error) {
-        await handleError(error, 'image');
-    } finally {
-        // Always reset the button state
-        const processButton = document.getElementById('processImages');
-        if (processButton) {
-            processButton.textContent = 'Process CSV';
-            processButton.classList.remove('stop-button');
-            processButton.disabled = false;
-            // Restore original click handler
-            processButton.onclick = processImageReplacement;
-        }
-        
-        imageReplaceState.status.isProcessing = false;
-    }
-}
+// Image replacement processing function removed - plugin now focuses on text only
 
 // Event Listeners for Text Replace
 document.getElementById('loadCSV').addEventListener('click', async () => {
@@ -2919,32 +2653,7 @@ document.getElementById('loadCSV').addEventListener('click', async () => {
     }
 });
 
-// Event Listeners for Image Replace
-document.getElementById('loadInputFolder').addEventListener('click', async () => {
-    try {
-        imageReplaceState.data.outputFolder = await fs.getFolder();
-        if (imageReplaceState.data.outputFolder) {
-            log(`[Cursor OK] Input folder selected: ${imageReplaceState.data.outputFolder.nativePath}`);
-            document.getElementById('imageStatus').textContent = `Input folder: ${imageReplaceState.data.outputFolder.nativePath}`;
-        }
-    } catch (error) {
-        log(`Error selecting input folder: ${error.message}`);
-        document.getElementById('imageStatus').textContent = 'Error selecting input folder';
-    }
-});
-
-document.getElementById('loadCSVImages').addEventListener('click', async () => {
-    try {
-        const file = await fs.getFileForOpening({ types: ['csv'] });
-        if (file) {
-            await loadImageCSV(file);
-            document.getElementById('imageStatus').textContent = 'CSV file loaded successfully';
-        }
-    } catch (error) {
-        log(`Error loading CSV: ${error.message}`);
-        document.getElementById('imageStatus').textContent = 'Error loading CSV file';
-    }
-});
+// Image replace event listeners removed - plugin now focuses on text only
 
 // Enhanced folder selection handler
 document.getElementById('selectOutputFolder').addEventListener('click', async () => {
@@ -2979,24 +2688,10 @@ document.getElementById('selectOutputFolder').addEventListener('click', async ()
     }
 });
 
-document.getElementById('selectOutputFolderImg').addEventListener('click', async () => {
-    try {
-        imageReplaceState.data.outputFolder = await fs.getFolder();
-        if (imageReplaceState.data.outputFolder) {
-            imageReplaceState.status.steps.outputFolderSelected = true;
-            log(`[Cursor OK] Image output folder selected: ${imageReplaceState.data.outputFolder.nativePath}`);
-            document.getElementById('imageStatus').textContent = `Output folder: ${imageReplaceState.data.outputFolder.nativePath}`;
-        }
-    } catch (error) {
-        imageReplaceState.status.steps.outputFolderSelected = false;
-        log(`Error selecting output folder: ${error.message}`);
-        document.getElementById('imageStatus').textContent = 'Error selecting output folder';
-    }
-});
+// Image output folder event listener removed - plugin now focuses on text only
 
 // Process button event listeners
 document.getElementById('processText').addEventListener('click', processTextReplacement);
-document.getElementById('processImages').addEventListener('click', processImageReplacement);
 
 // Restart Plugin button event listener
 document.getElementById('restartPlugin').addEventListener('click', async () => {
@@ -3044,23 +2739,21 @@ document.getElementById('restartPlugin').addEventListener('click', async () => {
 function initializeTabs() {
     // Get tab elements
     const textReplaceTab = document.getElementById('textReplaceTab');
-    const imageReplaceTab = document.getElementById('imageReplaceTab');
     const logsTab = document.getElementById('logsTab');
 
     // Get panel elements
     const textReplacePanel = document.getElementById('textReplacePanel');
-    const imageReplacePanel = document.getElementById('imageReplacePanel');
     const logsPanel = document.getElementById('logsPanel');
 
     // Function to switch tabs
     function switchTab(tabId) {
         // Hide all panels
-        [textReplacePanel, imageReplacePanel, logsPanel].forEach(panel => {
+        [textReplacePanel, logsPanel].forEach(panel => {
             if (panel) panel.style.display = 'none';
         });
 
         // Deactivate all tabs
-        [textReplaceTab, imageReplaceTab, logsTab].forEach(tab => {
+        [textReplaceTab, logsTab].forEach(tab => {
             if (tab) tab.classList.remove('active');
         });
 
@@ -3074,7 +2767,6 @@ function initializeTabs() {
 
     // Add click handlers
     if (textReplaceTab) textReplaceTab.addEventListener('click', () => switchTab('textReplace'));
-    if (imageReplaceTab) imageReplaceTab.addEventListener('click', () => switchTab('imageReplace'));
     if (logsTab) logsTab.addEventListener('click', () => switchTab('logs'));
 
     // Set initial tab
