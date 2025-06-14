@@ -1272,30 +1272,41 @@ async function processTextRow(row, index, total, folders) {
             fontSize: row[`fontsize${index}`]
         })));
 
-        // CRITICAL FIX: Process each layer with executeAsModal wrapper
-        for (const { layer, index: layerIndex } of textLayers) {
-            if (row[`text${layerIndex}`] || row[`fontsize${layerIndex}`]) {
-                try {
-                    // Wrap layer processing in executeAsModal for proper Photoshop operation
-                    const result = await app.executeAsModal(async () => {
-                        return await processLayer(layer, row, layerIndex);
-                    }, { commandName: `Update layer ${layer.name}` });
-                    
-                    layerUpdates.push(result);
-                } catch (layerError) {
-                    console.error("[DEBUG] Layer processing failed but continuing:", {
-                        layer: layer.name,
-                        error: layerError.message,
-                        code: layerError.code
-                    });
-                    errors.push({
-                        layer: layer.name,
-                        error: layerError.message,
-                        code: layerError.code
-                    });
-                    // Continue with next layer instead of throwing
-                    continue;
-                }
+        // CRITICAL FIX: Process all layers in a single executeAsModal wrapper
+        if (textLayers.length > 0) {
+            try {
+                // Wrap ALL layer processing in a single executeAsModal for proper Photoshop operation
+                await app.executeAsModal(async () => {
+                    for (const { layer, index: layerIndex } of textLayers) {
+                        if (row[`text${layerIndex}`] || row[`fontsize${layerIndex}`]) {
+                            try {
+                                const result = await processLayer(layer, row, layerIndex);
+                                layerUpdates.push(result);
+                            } catch (layerError) {
+                                console.error("[DEBUG] Layer processing failed but continuing:", {
+                                    layer: layer.name,
+                                    error: layerError.message,
+                                    code: layerError.code
+                                });
+                                errors.push({
+                                    layer: layer.name,
+                                    error: layerError.message,
+                                    code: layerError.code
+                                });
+                                // Continue with next layer instead of throwing
+                                continue;
+                            }
+                        }
+                    }
+                }, { commandName: `Update all text layers for row ${index + 1}` });
+                
+            } catch (modalError) {
+                console.error("[DEBUG] ExecuteAsModal failed for layer processing:", modalError);
+                errors.push({
+                    type: 'MODAL_ERROR',
+                    error: modalError.message,
+                    context: 'layer_processing'
+                });
             }
         }
 
