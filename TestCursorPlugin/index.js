@@ -1027,18 +1027,22 @@ async function saveAsPNG(doc, outputPath) {
         log(`[DEBUG] Created session token for file`);
         console.log(`[CURSOR SAVE] Created session token for file`);
         
-        // Use simple exportDocument with session token
+        // Use compatible save command with PNG format
         const result = await batchPlay(
             [
                 {
-                    _obj: "exportDocument",
+                    _obj: "save",
                     as: { 
                         _obj: "PNGFormat",
+                        PNG8: false,
                         transparency: true,
-                        interlaced: false
+                        interlaced: false,
+                        compression: 6
                     },
                     in: sessionToken, // Use the session token here
                     documentID: doc._id,
+                    copy: true,
+                    lowerCase: true,
                     _options: { dialogOptions: "dontDisplay" }
                 }
             ],
@@ -2066,18 +2070,22 @@ async function saveAsPNG(doc, outputPath) {
         log(`[DEBUG] Created session token for file`);
         console.log(`[CURSOR SAVE] Created session token for file`);
         
-        // CRITICAL FIX: Use simple batchPlay with session token
+        // CRITICAL FIX: Use compatible save command with PNG format
         const result = await batchPlay(
             [
                 {
-                    _obj: "exportDocument",
+                    _obj: "save",
                     as: { 
                         _obj: "PNGFormat",
+                        PNG8: false,
                         transparency: true,
-                        interlaced: false
+                        interlaced: false,
+                        compression: 6
                     },
                     in: sessionToken, // Use the session token directly
                     documentID: doc._id,
+                    copy: true,
+                    lowerCase: true,
                     _options: { dialogOptions: "dontDisplay" }
                 }
             ],
