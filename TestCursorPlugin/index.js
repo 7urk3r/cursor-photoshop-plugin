@@ -1438,6 +1438,42 @@ async function processTextRow(row, index, total, folders) {
     }
 }
 
+// Test function for isolated PNG save testing
+async function runSingleSaveTest() {
+    log("Running single save test...");
+    
+    try {
+        // Get the activeDocument and outputFolder from textReplaceState
+        const doc = app.activeDocument;
+        const outputFolder = textReplaceState.data.outputFolder;
+        
+        // Check if both document and folder exist
+        if (!doc) {
+            log("❌ Error: No active document found");
+            return;
+        }
+        
+        if (!outputFolder) {
+            log("❌ Error: No output folder selected");
+            return;
+        }
+        
+        // Setup output folders to get the PNG folder
+        const folders = await setupTextOutputFolders(outputFolder);
+        
+        // Call the existing saveAsPNG function with a test filename
+        const testPath = `${folders.pngFolder.nativePath}/test-output.png`;
+        log(`Testing PNG save to: ${testPath}`);
+        
+        const result = await saveAsPNG(doc, testPath);
+        log(`✅ Test save completed: ${JSON.stringify(result)}`);
+        
+    } catch (error) {
+        log(`❌ Test save failed: ${error.message}`);
+        console.error("Test save error:", error);
+    }
+}
+
 async function verifyFontSize(layer, expectedSize) {
     try {
         log(`[DEBUG] Starting font size verification for layer "${layer.name}" (ID: ${layer._id})`);
@@ -1985,16 +2021,19 @@ async function saveAsPNG(doc, outputPath) {
         log(`[DEBUG] Created session token for file`);
         console.log(`[CURSOR SAVE] Created session token for file`);
         
-        // CRITICAL FIX: Use executeAsModal wrapper for proper Photoshop operation
-        const result = await app.batchPlay(
+        // CRITICAL FIX: Use simple batchPlay with session token
+        const result = await batchPlay(
             [
                 {
-                    _obj: "save",
-                    as: { _obj: "PNGFormat", compression: 6 },
-                    in: { _path: sessionToken, _kind: "local" }, // Use the session token here
+                    _obj: "exportDocument",
+                    as: { 
+                        _obj: "PNGFormat",
+                        transparency: true,
+                        interlaced: false
+                    },
+                    in: sessionToken, // Use the session token directly
                     documentID: doc._id,
-                    copy: true,
-                    lowerCase: true,
+                    _options: { dialogOptions: "dontDisplay" }
                 }
             ],
             { synchronousExecution: true }
@@ -2847,5 +2886,4 @@ async function processCSV(csvData) {
         
         throw error;
     }
-}
 }
