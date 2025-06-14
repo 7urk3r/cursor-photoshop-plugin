@@ -1,6 +1,6 @@
 console.log("✅ TestCursorPlugin loaded");
 
-const { app } = require("photoshop");
+const { app, core } = require("photoshop");
 const { batchPlay } = require('photoshop').action;
 const fs = require('uxp').storage.localFileSystem;
 const formats = require('uxp').storage.formats;
@@ -954,251 +954,62 @@ async function loadTextCSV(file) {
 // Image CSV loading function removed - plugin now focuses on text only
 
 // Updated PNG save function with proper API v2 format
+/**
+ * CRITICAL FIX: Simplified PNG save function using proper session tokens and executeAsModal
+ * Based on the analysis, this addresses the core issues preventing PNG files from being saved
+ */
 async function saveAsPNG(doc, outputPath) {
     try {
         log(`[DEBUG] Starting PNG save to: ${outputPath}`);
         console.log(`[CURSOR SAVE] Starting PNG save to: ${outputPath}`);
         
-        // Check if we're dealing with a file token or a path string
-        const isToken = typeof outputPath !== 'string';
+        const fs = require('uxp').storage.localFileSystem;
         
-        // For debugging
-        log(`[DEBUG] Save PNG using ${isToken ? 'token' : 'path string'}: ${isToken ? 'File Token' : outputPath}`);
-        console.log(`[CURSOR SAVE] Save PNG using ${isToken ? 'token' : 'path string'}: ${isToken ? 'File Token' : outputPath}`);
+        // CRITICAL FIX: Parse the path to get directory and filename
+        const pathParts = outputPath.split('/');
+        const fileName = pathParts.pop();
+        const dirPath = pathParts.join('/');
         
-        // APPROACH 1: Use direct file system API for most reliable method
-        try {
-            log(`[DEBUG] APPROACH 1: Attempting direct file system API save...`);
-            console.log(`[CURSOR SAVE] APPROACH 1: Attempting direct file system API save...`);
-            
-            const fs = require('uxp').storage.localFileSystem;
-            const formats = require('uxp').storage.formats;
-            
-            // Parse the path to get directory and filename if it's a string path
-            let outputFile;
-            if (!isToken) {
-                try {
-                    // Extract directory path and filename
-                    const pathParts = outputPath.split('/');
-                    const fileName = pathParts.pop();
-                    const dirPath = pathParts.join('/');
-                    
-                    log(`[DEBUG] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
-                    console.log(`[CURSOR SAVE] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
-                    
-                    // Get the directory
-                    const directory = await fs.getFolder(dirPath);
-                    log(`[DEBUG] Got directory: ${directory.nativePath}`);
-                    console.log(`[CURSOR SAVE] Got directory: ${directory.nativePath}`);
-                    
-                    // Create or get the file
-                    outputFile = await directory.createFile(fileName, { overwrite: true });
-                    log(`[DEBUG] Created output file: ${outputFile.nativePath}`);
-                    console.log(`[CURSOR SAVE] Created output file: ${outputFile.nativePath}`);
-                } catch (parseError) {
-                    log(`[DEBUG] Path parsing error: ${parseError.message}`);
-                    console.log(`[CURSOR SAVE] Path parsing error: ${parseError.message}`);
-                    throw parseError;
-                }
-            } else {
-                outputFile = outputPath;
-                log(`[DEBUG] Using provided file token`);
-                console.log(`[CURSOR SAVE] Using provided file token`);
-            }
-            
-            // Save to temporary file first
-            log(`[DEBUG] Creating temporary file for PNG save...`);
-            console.log(`[CURSOR SAVE] Creating temporary file for PNG save...`);
-            const tempFile = await fs.createTemporaryFile("temp-png-");
-            log(`[DEBUG] Created temp file: ${tempFile.nativePath}`);
-            console.log(`[CURSOR SAVE] Created temp file: ${tempFile.nativePath}`);
-            
-            // Create a session token for the temp file
-            const tempToken = fs.createSessionToken(tempFile);
-            
-            // Use exportDocument to save to temp file
-            log(`[DEBUG] Exporting document to temp file...`);
-            console.log(`[CURSOR SAVE] Exporting document to temp file...`);
-            const exportDesc = {
-                _obj: "exportDocument",
-                documentID: doc._id,
-                format: {
-                    _obj: "PNG",
-                    PNG8: false,
-                    transparency: true,
-                    interlaced: false,
-                    quality: 100
-                },
-                in: tempToken,
-                _options: { 
-                    dialogOptions: "dontDisplay"
-                }
-            };
-            
-            await batchPlay([exportDesc], { synchronousExecution: true });
-            log(`[DEBUG] Successfully exported to temp file`);
-            console.log(`[CURSOR SAVE] Successfully exported to temp file`);
-            
-            // Read temp file content
-            log(`[DEBUG] Reading temp file content...`);
-            console.log(`[CURSOR SAVE] Reading temp file content...`);
-            const tempContent = await tempFile.read({ format: formats.binary });
-            log(`[DEBUG] Read ${tempContent.byteLength} bytes from temp file`);
-            console.log(`[CURSOR SAVE] Read ${tempContent.byteLength} bytes from temp file`);
-            
-            // Write content to final destination
-            log(`[DEBUG] Writing content to final destination...`);
-            console.log(`[CURSOR SAVE] Writing content to final destination...`);
-            await outputFile.write(tempContent, { format: formats.binary });
-            log(`[DEBUG] ✅ Successfully wrote PNG file: ${outputFile.nativePath}`);
-            console.log(`[CURSOR SAVE] ✅ Successfully wrote PNG file: ${outputFile.nativePath}`);
-            
-            // Clean up temp file
-            await tempFile.delete();
-            log(`[DEBUG] Cleaned up temp file`);
-            console.log(`[CURSOR SAVE] Cleaned up temp file`);
-            
-            return { success: true, method: "direct-fs", path: outputFile.nativePath };
-        } catch (directFsError) {
-            log(`[DEBUG] Direct file system approach failed: ${directFsError.message}`);
-            console.log(`[CURSOR SAVE] ❌ Direct file system approach failed: ${directFsError.message}`);
-            log(`[DEBUG] Error details: ${JSON.stringify(directFsError)}`);
-            
-            // Continue to next approach
-        }
+        log(`[DEBUG] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
+        console.log(`[CURSOR SAVE] Parsed path - Directory: ${dirPath}, Filename: ${fileName}`);
         
-        // APPROACH 2: Use exportDocument with modern format
-        try {
-            log(`[DEBUG] APPROACH 2: Attempting exportDocument method...`);
-            console.log(`[CURSOR SAVE] APPROACH 2: Attempting exportDocument method...`);
-            
-            const exportDesc = {
-                _obj: "exportDocument",
-                documentID: doc._id,
-                format: {
-                    _obj: "PNG",
-                    PNG8: false,
-                    transparency: true,
-                    interlaced: false,
-                    quality: 100
-                },
-                in: isToken ? outputPath : { _path: outputPath },
-                _options: { 
-                    dialogOptions: "dontDisplay"
-                }
-            };
-            
-            const exportResult = await batchPlay(
-                [exportDesc],
+        // Get the directory and create the file
+        const directory = await fs.getFolder(dirPath);
+        const outputFile = await directory.createFile(fileName, { overwrite: true });
+        
+        log(`[DEBUG] Created output file: ${outputFile.nativePath}`);
+        console.log(`[CURSOR SAVE] Created output file: ${outputFile.nativePath}`);
+        
+        // CRITICAL FIX: Create a session token for batchPlay to use
+        const sessionToken = fs.createSessionToken(outputFile);
+        
+        log(`[DEBUG] Created session token for file`);
+        console.log(`[CURSOR SAVE] Created session token for file`);
+        
+        // CRITICAL FIX: Use executeAsModal wrapper for proper Photoshop operation
+        const result = await app.batchPlay(
+            [
                 {
-                    synchronousExecution: true,
-                    modalBehavior: "none"
+                    _obj: "save",
+                    as: { _obj: "PNGFormat", compression: 6 },
+                    in: { _path: sessionToken, _kind: "local" }, // Use the session token here
+                    documentID: doc._id,
+                    copy: true,
+                    lowerCase: true,
                 }
-            );
-            
-            log(`[DEBUG] ✅ Export PNG Save completed successfully`);
-            console.log(`[CURSOR SAVE] ✅ Export PNG Save completed successfully`);
-            return { success: true, method: "exportDocument", result: exportResult };
-        } catch (exportError) {
-            log(`[DEBUG] Export PNG Save failed: ${exportError.message}`);
-            console.log(`[CURSOR SAVE] ❌ Export PNG Save failed: ${exportError.message}`);
-            log(`[DEBUG] Error details: ${JSON.stringify(exportError)}`);
-            
-            // Continue to next approach
-        }
+            ],
+            { synchronousExecution: true }
+        );
         
-        // APPROACH 3: Use basic save with minimal options
-        try {
-            log(`[DEBUG] APPROACH 3: Attempting basic save method...`);
-            console.log(`[CURSOR SAVE] APPROACH 3: Attempting basic save method...`);
-            
-            const saveDesc = {
-                _obj: "save",
-                as: {
-                    _obj: "PNGFormat",
-                    PNG8: false
-                },
-                in: isToken ? outputPath : { _path: outputPath },
-                copy: true,
-                _options: { 
-                    dialogOptions: "dontDisplay"
-                }
-            };
-            
-            const saveResult = await batchPlay(
-                [saveDesc],
-                {
-                    synchronousExecution: true,
-                    modalBehavior: "none"
-                }
-            );
-            
-            log(`[DEBUG] ✅ Basic PNG Save completed successfully`);
-            console.log(`[CURSOR SAVE] ✅ Basic PNG Save completed successfully`);
-            return { success: true, method: "basicSave", result: saveResult };
-        } catch (saveError) {
-            log(`[DEBUG] Basic PNG Save failed: ${saveError.message}`);
-            console.log(`[CURSOR SAVE] ❌ Basic PNG Save failed: ${saveError.message}`);
-            log(`[DEBUG] Error details: ${JSON.stringify(saveError)}`);
-            
-            // Continue to next approach
-        }
+        log(`[DEBUG] ✅ PNG save completed successfully`);
+        console.log(`[CURSOR SAVE] ✅ PNG save completed successfully`);
         
-        // APPROACH 4: Use quickExport
-        try {
-            log(`[DEBUG] APPROACH 4: Attempting quickExport method...`);
-            console.log(`[CURSOR SAVE] APPROACH 4: Attempting quickExport method...`);
-            
-            const quickExportDesc = {
-                _obj: "quickExport",
-                format: {
-                    _enum: "exportFormat",
-                    _value: "PNG"
-                },
-                destination: {
-                    _enum: "saveStageType",
-                    _value: "saveStageType"
-                },
-                in: isToken ? outputPath : { _path: outputPath },
-                _options: { 
-                    dialogOptions: "dontDisplay"
-                }
-            };
-            
-            const quickExportResult = await batchPlay(
-                [quickExportDesc],
-                {
-                    synchronousExecution: true,
-                    modalBehavior: "none"
-                }
-            );
-            
-            log(`[DEBUG] ✅ QuickExport PNG Save completed successfully`);
-            console.log(`[CURSOR SAVE] ✅ QuickExport PNG Save completed successfully`);
-            return { success: true, method: "quickExport", result: quickExportResult };
-        } catch (quickExportError) {
-            log(`[DEBUG] QuickExport PNG Save failed: ${quickExportError.message}`);
-            console.log(`[CURSOR SAVE] ❌ QuickExport PNG Save failed: ${quickExportError.message}`);
-            log(`[DEBUG] Error details: ${JSON.stringify(quickExportError)}`);
-            
-            // All approaches failed
-            throw new PluginError(
-                'All PNG save methods failed',
-                'PNG_SAVE_ERROR',
-                { 
-                    directFsError: directFsError?.message,
-                    exportError: exportError?.message,
-                    saveError: saveError?.message,
-                    quickExportError: quickExportError?.message,
-                    outputPath 
-                }
-            );
-        }
+        return { success: true, method: "sessionToken", path: outputFile.nativePath, result };
+        
     } catch (error) {
-        log(`[DEBUG] PNG Save Failed with critical error: ${error.message}`);
-        console.log(`[CURSOR SAVE] ❌ PNG Save Failed with critical error: ${error.message}`);
-        log(`[DEBUG] Stack trace: ${error.stack}`);
-        throw error;
+        log(`[DEBUG] ❌ PNG save failed: ${error.message}`);
+        console.log(`[CURSOR SAVE] ❌ PNG save failed: ${error.message}`);
+        throw new PluginError('PNG save failed', 'PNG_SAVE_ERROR', { error, outputPath });
     }
 }
 
@@ -1461,11 +1272,15 @@ async function processTextRow(row, index, total, folders) {
             fontSize: row[`fontsize${index}`]
         })));
 
-        // Process each layer, continuing even if one fails
+        // CRITICAL FIX: Process each layer with executeAsModal wrapper
         for (const { layer, index: layerIndex } of textLayers) {
             if (row[`text${layerIndex}`] || row[`fontsize${layerIndex}`]) {
                 try {
-                    const result = await processLayer(layer, row, layerIndex);
+                    // Wrap layer processing in executeAsModal for proper Photoshop operation
+                    const result = await app.executeAsModal(async () => {
+                        return await processLayer(layer, row, layerIndex);
+                    }, { commandName: `Update layer ${layer.name}` });
+                    
                     layerUpdates.push(result);
                 } catch (layerError) {
                     console.error("[DEBUG] Layer processing failed but continuing:", {
@@ -1519,33 +1334,26 @@ async function processTextRow(row, index, total, folders) {
                     png: pngPath
                 });
 
-                // Save PNG file using direct save first
+                // CRITICAL FIX: Wrap PNG save in executeAsModal for proper Photoshop operation
                 let pngSaved = false;
                 try {
-                    console.log(`[CURSOR SAVE] Attempting direct PNG save...`);
-                    const directPngResult = await directSaveFile(doc, pngPath, 'PNG');
-                    console.log(`[CURSOR SAVE] ✅ Direct PNG save succeeded:`, directPngResult);
-                    pngSaved = true;
-                    filesSaved.png = true;
-                } catch (directPngError) {
-                    console.log(`[CURSOR SAVE] ❌ Direct PNG save failed: ${directPngError.message}`);
+                    console.log(`[CURSOR SAVE] Attempting PNG save with executeAsModal...`);
                     
-                    // Fall back to regular save methods
-                    try {
-                        console.log(`[CURSOR SAVE] Falling back to regular PNG save methods...`);
+                    // Use executeAsModal wrapper for proper Photoshop operation
+                    await app.executeAsModal(async () => {
                         const pngSaveResult = await saveAsPNG(doc, pngPath);
                         console.log(`[CURSOR SAVE] ✅ PNG save result:`, pngSaveResult);
                         pngSaved = true;
                         filesSaved.png = true;
-                    } catch (pngError) {
-                        console.log(`[CURSOR SAVE] ❌ All PNG save methods failed`);
-                        errors.push({
-                            type: 'PNG_SAVE',
-                            error: pngError.message,
-                            directError: directPngError.message,
-                            path: pngPath
-                        });
-                    }
+                    }, { commandName: `Save PNG for ${baseFileName}` });
+                    
+                } catch (pngError) {
+                    console.log(`[CURSOR SAVE] ❌ PNG save failed: ${pngError.message}`);
+                    errors.push({
+                        type: 'PNG_SAVE',
+                        error: pngError.message,
+                        path: pngPath
+                    });
                 }
 
 
